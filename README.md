@@ -49,7 +49,112 @@ WFH allowances, and local travel policies (auto-rickshaw, cab, metro).
 
 ---
 
-## 🎯 Real-World Task
+## 🎯 Quick Reference: What The Agent Does
+
+The agent plays the role of a **corporate compliance officer**. Each episode,
+it receives one employee expense claim and must decide:
+
+- ✅ **Approve** — claim follows all policy rules
+- ❌ **Reject** — claim violates policy
+- ⚠️ **Escalate** — claim requires senior review (L7+ employees)
+
+The agent can also:
+- 🔍 **SearchPolicy** — look up relevant rules before deciding
+- 📋 **RequestInformation** — ask for missing documents
+
+---
+
+## 📋 The 15 Policy Rules (Quick Reference)
+
+| # | Category | Rule |
+|---|---|---|
+| 1 | Meal | Under ₹500 → Approve, no receipt needed |
+| 2 | Meal | ₹500–₹2,000 → receipt required |
+| 3 | Meal | Over ₹2,000 → receipt + manager note required |
+| 4 | Alcohol | Any alcohol on bill → Reject entire claim |
+| 5 | Travel | Auto/metro under ₹500 → no receipt needed |
+| 6 | Travel | Cab after 10 PM → pre-approved with receipt |
+| 7 | Travel | Cab before 10 PM → manager note required |
+| 8 | Flight | L1–L6 must fly economy → business class = Reject |
+| 9 | Flight | L7+ may fly business class → Escalate for review |
+| 10 | International | Over ₹50,000 → VP approval required |
+| 11 | WFH | Internet + electricity capped at ₹1,000/month |
+| 12 | GST | Claims over ₹5,000 → GST invoice required |
+| 13 | Duplicate | Same amount + same date = auto Reject |
+| 14 | Seniority | L7+ employees → always Escalate |
+| 15 | Personal | Personal expenses → always Reject |
+
+---
+
+## 🏆 Baseline Performance
+
+| Difficulty | Task | LLM Agent (Llama-3.1-8B) | Rule-Based Baseline |
+|---|---|---|---|
+| Easy | Single-step classification | ≥ 0.90* | 0.78 |
+| Medium | Policy retrieval | ≥ 0.80* | 0.61 |
+| Hard | Multi-turn contextual | ≥ 0.70* | 0.34 |
+
+*LLM scores with step-aware prompting (deployed April 2026)
+
+---
+
+## 🚀 Quick Start
+
+### Use the Live Space
+
+Visit the running instance: **https://huggingface.co/spaces/vanshg1810/corporate-compliance-env**
+
+### Run Locally with Docker
+
+```bash
+# Clone and build
+git clone https://huggingface.co/spaces/vanshg1810/corporate-compliance-env
+cd corporate-compliance-env
+docker build -t compliance-env .
+docker run -p 8000:8000 compliance-env
+
+# Validate against OpenEnv spec
+openenv validate --url http://localhost:8000 --verbose
+```
+
+### Run the LLM Inference Agent
+
+```bash
+export API_BASE_URL="https://router.huggingface.co/v1"
+export MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
+export HF_TOKEN="your_huggingface_token"
+
+python inference.py
+```
+
+---
+
+## 📡 API Endpoints (Quick Reference)
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/health` | GET | Server health check |
+| `/reset` | POST | Start a new episode • Body: `{"task_id": "easy\|medium\|hard"}` |
+| `/step` | POST | Submit an action • Body: `ComplianceAction` JSON |
+| `/state` | GET | Get current episode state |
+| `/tasks` | GET | List all tasks + action schema |
+| `/grader` | POST | Get final score for completed episode |
+| `/baseline` | POST | Run baseline agent on all 3 tasks |
+| `/docs` | GET | Swagger interactive API documentation |
+
+---
+
+## 👥 Team
+
+| Name | Role |
+|---|---|
+| **Vansh Gupta** | Backend, Environment Design, Deployment, LLM Agent |
+| **Sanya** | Dataset Generation, Policy Rules, Baseline Agent |
+| **Vedika** | QA, Testing, Validation, Bug Fixes |
+
+Built for the **Meta PyTorch OpenEnv Hackathon 2026**.
+
+---
 
 The agent acts as an AI Compliance Officer. At each step it receives
 an open "Compliance Ticket" (an expense claim or request) and must:
