@@ -30,7 +30,7 @@ COMPLIANCE_API = os.getenv("COMPLIANCE_API", "http://localhost:8000")
 # ===== Task Configuration =====
 TASKS = ["easy", "medium", "hard"]
 MAX_STEPS_PER_TASK = 10
-TEMPERATURE = 0.2
+TEMPERATURE = 0.0
 MAX_TOKENS = 256
 
 # ===== Action Patterns =====
@@ -52,6 +52,13 @@ SYSTEM_PROMPT = textwrap.dedent(
     
     Valid decisions: "Approve", "Reject", "Escalate"
     
+    KEY POLICY RULES QUICK REFERENCE:
+    - Amounts < ₹500: No receipt required
+    - Amounts ≥ ₹500: Receipt REQUIRED
+    - Alcohol, gifts, shopping: ALWAYS reject
+    - Missing documents: Request information
+    - VP+ (L7-L9): Escalate for review
+    
     Respond with ONLY a valid action in JSON format:
     {"action_type": "...", "query": "...", "message": "...", "decision": "...", "reason": "..."}
     """
@@ -60,9 +67,16 @@ SYSTEM_PROMPT = textwrap.dedent(
 
 def build_user_prompt(observation: Dict, task_id: str, step: int) -> str:
     """Build the user prompt from the current observation."""
+    steps_remaining = (MAX_STEPS_PER_TASK - step + 1)
+    
+    # Add urgency message if running low on steps
+    urgency = ""
+    if step >= 3:
+        urgency = "\n⚠️  URGENT: You only have {} step(s) remaining. YOU MUST MAKE A FINAL DECISION NOW.\nDo NOT search policy again. Make your FINAL decision: Approve, Reject, or Escalate.".format(steps_remaining - 1)
+    
     prompt = textwrap.dedent(
         f"""
-        Task: {task_id} | Step: {step}
+        Task: {task_id} | Step: {step}/{MAX_STEPS_PER_TASK}
         
         Ticket ID: {observation.get('ticket_id')}
         Employee: {observation.get('employee_name')} ({observation.get('employee_role')})
@@ -73,8 +87,9 @@ def build_user_prompt(observation: Dict, task_id: str, step: int) -> str:
         Missing Document: {observation.get('missing_document')}
         Risk Score: {observation.get('risk_score')}
         
-        Policy Hint: {observation.get('rule_keyword', '(no hint)')}
-        Steps Remaining: {observation.get('max_steps', 0) - observation.get('step_count', 0)}
+        Your Task:
+        - Review the ticket against policy rules
+        - Make a FINAL decision (Approve/Reject/Escalate) when you have sufficient information{urgency}
         
         What action do you take?
         """

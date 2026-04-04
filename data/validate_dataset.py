@@ -1,8 +1,3 @@
-"""
-Sanya's Day 3 - Dataset Validation Script
-Validates all claims against policy rules and generates quality report
-"""
-
 import json
 import re
 from pathlib import Path
