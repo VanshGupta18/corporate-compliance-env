@@ -5,7 +5,16 @@ colorFrom: blue
 colorTo: green
 sdk: docker
 pinned: false
+app_port: 7860
+base_path: /docs
+tags:
+  - openenv
+  - fastapi
+  - reinforcement-learning
+  - finance
+  - compliance
 ---
+
 
 # 🏛️ Corporate Policy Compliance Environment
 
