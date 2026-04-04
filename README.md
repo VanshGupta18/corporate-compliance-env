@@ -524,12 +524,4 @@ can handle ~70% of routine compliance decisions autonomously.
 
 ---
 
-## 🤝 Contributing
-
-Pull requests welcome. To add new expense categories or policy rules,
-edit `data/policy.md` and add corresponding test cases to
-`data/claims.json`. Run `pytest` before submitting.
-
----
-
-*Built for the OpenEnv Hackathon 2026.*
+*Built for the Meta Hackathon 2026.*
