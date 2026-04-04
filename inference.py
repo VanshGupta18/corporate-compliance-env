@@ -22,7 +22,7 @@ from app.client import ComplianceEnvClient
 from app.models import ComplianceAction, ComplianceObservation
 
 # ===== Environment Configuration =====
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
+API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/hf-inference/v1")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "mistralai/Mistral-7B-Instruct-v0.1")
 COMPLIANCE_API = os.getenv("COMPLIANCE_API", "http://localhost:8000")
@@ -80,6 +80,63 @@ def build_user_prompt(observation: Dict, task_id: str, step: int) -> str:
         """
     ).strip()
     return prompt
+
+
+def rule_based_fallback(observation: Dict) -> Dict:
+    """
+    Rule-based fallback decision when LLM fails.
+    Uses policy rules to make a reasonable decision.
+    """
+    amount = observation.get("amount", 0)
+    level = observation.get("employee_level", "L1")
+    has_receipt = observation.get("has_receipt", False)
+    missing_doc = observation.get("missing_document")
+    description = observation.get("description", "").lower()
+    
+    # Check for alcohol or personal items
+    if "alcohol" in description or "gift" in description or "shopping" in description:
+        return {
+            "action_type": "ResolveTicket",
+            "decision": "Reject",
+            "reason": "Policy violation: alcohol/gift/personal items not approved",
+        }
+    
+    # VP and above always escalate
+    if level in ["L7", "L8", "L9"]:
+        return {
+            "action_type": "ResolveTicket",
+            "decision": "Escalate",
+            "reason": "High-level employee claim requires escalation",
+        }
+    
+    # If missing documents, request them
+    if missing_doc:
+        return {
+            "action_type": "RequestInformation",
+            "message": f"Please provide the missing: {missing_doc}",
+        }
+    
+    # Meals and travel rules
+    if amount < 500:
+        return {
+            "action_type": "ResolveTicket",
+            "decision": "Approve",
+            "reason": "Amount below ₹500 threshold, no receipt required",
+        }
+    
+    if amount >= 500 and not has_receipt:
+        return {
+            "action_type": "ResolveTicket",
+            "decision": "Reject",
+            "reason": "Receipt required for amounts above ₹500",
+        }
+    
+    # Default approval for compliant claims
+    return {
+        "action_type": "ResolveTicket",
+        "decision": "Approve",
+        "reason": "Claim meets policy requirements",
+    }
 
 
 def parse_model_response(response_text: str) -> Optional[Dict]:
@@ -170,8 +227,32 @@ def run_episode(client: Any, task_id: str) -> Dict:
             )
             response_text = completion.choices[0].message.content or ""
         except Exception as exc:
-            print(f"LLM request failed: {exc}. Using default action.")
-            response_text = '{"action_type": "ResolveTicket", "decision": "Reject", "reason": "Error"}'
+            print(f"LLM request failed: {exc}. Using rule-based fallback.")
+            # Use rule-based fallback when LLM fails
+            obs_dict = observation.model_dump() if hasattr(observation, 'model_dump') else observation.__dict__
+            action_dict = rule_based_fallback(obs_dict)
+            action_data = {
+                "action_type": action_dict.get("action_type", "ResolveTicket"),
+                "query": action_dict.get("query"),
+                "message": action_dict.get("message"),
+                "decision": action_dict.get("decision"),
+                "reason": action_dict.get("reason"),
+            }
+            action = ComplianceAction(**action_data)
+            print(f"Fallback Action: {action.action_type}")
+            if action.decision:
+                print(f"  Decision: {action.decision}")
+            step_result = client.step(action)
+            observation = step_result.observation
+            reward = step_result.reward or 0.0
+            print(f"Reward: {reward:+.2f} | Done: {step_result.done}")
+            episode_data["steps"].append({"step": step, "action": action.action_type, "reward": reward})
+            episode_data["total_reward"] += reward
+            if step_result.done:
+                episode_data["done"] = True
+                print(f"\nEpisode complete!")
+                break
+            continue
 
         # Parse response
         action_dict = parse_model_response(response_text)
