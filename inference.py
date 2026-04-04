@@ -15,11 +15,11 @@ import os
 import re
 import json
 import textwrap
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 
 from openai import OpenAI
 from app.client import ComplianceEnvClient
-from app.models import ComplianceAction
+from app.models import ComplianceAction, ComplianceObservation
 
 # ===== Environment Configuration =====
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
@@ -123,7 +123,7 @@ def parse_model_response(response_text: str) -> Optional[Dict]:
     return None
 
 
-def run_episode(client: ComplianceEnvClient, task_id: str) -> Dict:
+def run_episode(client: Any, task_id: str) -> Dict:
     """Run a single episode on the given task."""
     print(f"\n{'='*60}")
     print(f"Running Episode: {task_id.upper()}")
@@ -148,7 +148,8 @@ def run_episode(client: ComplianceEnvClient, task_id: str) -> Dict:
         print(f"Amount: ₹{observation.amount} | Missing: {observation.missing_document}")
 
         # Build prompt for LLM
-        user_prompt = build_user_prompt(observation.model_dump(), task_id, step)
+        obs_dict = observation.model_dump() if hasattr(observation, 'model_dump') else observation.__dict__
+        user_prompt = build_user_prompt(obs_dict, task_id, step)
 
         # Call LLM
         try:
@@ -178,8 +179,17 @@ def run_episode(client: ComplianceEnvClient, task_id: str) -> Dict:
             print(f"Failed to parse response: {response_text}")
             action_dict = {"action_type": "ResolveTicket", "decision": "Reject", "reason": "Parse error"}
 
+        # Ensure only required fields for ComplianceAction
+        action_data = {
+            "action_type": action_dict.get("action_type", "ResolveTicket"),
+            "query": action_dict.get("query"),
+            "message": action_dict.get("message"),
+            "decision": action_dict.get("decision"),
+            "reason": action_dict.get("reason"),
+        }
+
         # Create action
-        action = ComplianceAction(**action_dict)
+        action = ComplianceAction(**action_data)
         print(f"Action: {action.action_type}")
         if action.query:
             print(f"  Query: {action.query}")
