@@ -1,3 +1,12 @@
+---
+title: Corporate Compliance Environment
+emoji: 📋
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # 🏛️ Corporate Policy Compliance Environment
 
 > An OpenEnv-compliant Reinforcement Learning environment that simulates
@@ -9,7 +18,7 @@
 [![HuggingFace](https://img.shields.io/badge/HuggingFace-Space-orange)](https://huggingface.co/spaces/YOUR_USERNAME/corporate-compliance-env)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-🤗 **Live Space:** `https://huggingface.co/spaces/YOUR_USERNAME/corporate-compliance-env`
+🤗 **Live Space:** `https://huggingface.co/spaces/vanshg1810/corporate-compliance-env`
 
 ---
 
