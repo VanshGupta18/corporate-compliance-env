@@ -17,23 +17,23 @@ Project setup, backend environment flow, and final integration.
 Create a runnable project skeleton and lock API/data schemas.
 
 ### Tasks
-1.  **Create project folders**: `app/`, `data/`, `tests/`.
-    -   **Why it's important**: This sets up a standard, organized directory structure. Separating `app` (business logic), `data` (datasets), and `tests` (quality assurance) keeps the project clean and easy for everyone to navigate.
-    -   **How to do it**: Open your terminal and run the command `mkdir app data tests`.
+1.  **Create project folders**: `app/`, `app/server/`, `data/`, `tests/`.
+    -   **Why it's important**: This sets up a standard, organized directory structure. Separating package code (`app`), server runtime code (`app/server`), datasets (`data`), and tests keeps the project clean and easy for everyone to navigate.
+    -   **How to do it**: Open your terminal and run the command `mkdir -p app/server data tests`.
     -   **Reference Code**:
         ```bash
-        mkdir app data tests
+        mkdir -p app/server data tests
         ```
 
-2.  **Add starter files**: `app/main.py`, `app/models.py`, `app/environment.py`, `app/graders.py`, `data/policy.md`, `data/claims.json`, `tests/test_graders.py`, `requirements.txt`, `openenv.yaml`.
-    -   **Why it's important**: Creating empty files establishes the complete project skeleton, so all team members can see where their work will eventually go.
-    -   **How to do it**: Use the `touch` command for each file. For example: `touch app/main.py app/models.py data/policy.md requirements.txt openenv.yaml` and so on for all the files listed.
+2.  **Add starter files**: `app/__init__.py`, `app/models.py`, `app/client.py`, `app/server/environment.py`, `app/server/app.py`, `app/graders.py`, `app/baseline.py`, `data/policy.md`, `data/claims.json`, `tests/test_graders.py`, `requirements.txt`, `openenv.yaml`.
+    -   **Why it's important**: Creating empty files establishes the complete project skeleton in the revised layout, so all team members can see exactly where server code, client code, and data contracts will live.
+    -   **How to do it**: Use the `touch` command for each file. For example: `touch app/__init__.py app/models.py app/client.py app/server/app.py` and so on for all files in the list.
     -   **Reference Code**:
         ```bash
-        touch app/main.py app/models.py app/environment.py app/graders.py data/policy.md data/claims.json tests/test_graders.py requirements.txt openenv.yaml
+        touch app/__init__.py app/models.py app/client.py app/server/environment.py app/server/app.py app/graders.py app/baseline.py data/policy.md data/claims.json tests/test_graders.py requirements.txt openenv.yaml
         ```
 
-3.  **Set up Python environment and install core packages** (`fastapi`, `uvicorn`, `pydantic`, `pytest`).
+3.  **Set up Python environment and install core packages** (`fastapi`, `uvicorn`, `pydantic`, `pytest`, OpenEnv SDK).
     -   **Why it's important**: This creates an isolated space for the project's software libraries. It prevents conflicts with other projects and ensures all three team members are using the exact same library versions, which is critical for avoiding "it works on my machine" problems.
     -   **How to do it**:
         1.  Create the virtual environment: `python3 -m venv venv`
@@ -46,6 +46,7 @@ Create a runnable project skeleton and lock API/data schemas.
         uvicorn[standard]
         pydantic
         pytest
+        openenv
         ```
 
 4.  **Implement initial Pydantic schemas in `app/models.py`** for action, observation, and state.
@@ -67,28 +68,63 @@ Create a runnable project skeleton and lock API/data schemas.
             reason: Optional[str] = None
         ```
 
-5.  **Add placeholder API endpoints in `app/main.py`**: `/reset`, `/step`, `/state`, `/tasks`, `/grader`, `/baseline`.
-    -   **Why it's important**: You'll create dummy functions for each API endpoint. They won't do anything yet, but they allow the server to run without crashing. This is crucial for Vedika, as it unblocks her from writing initial "smoke tests" to confirm the server is reachable.
+5.  **Create exports in `app/__init__.py`** for RL framework imports.
+    -   **Why it's important**: RL frameworks and external scripts should be able to import the environment and client from a stable package root (`app`). This avoids brittle path-based imports.
     -   **How to do it**:
-        1.  In `app/main.py`, import `FastAPI` and your Pydantic models.
-        2.  Initialize the app: `app = FastAPI()`.
+        1.  Import the environment class from `app/server/environment.py`.
+        2.  Import your HTTP client subclass from `app/client.py`.
+        3.  Define `__all__` with these public exports so integrations are explicit.
+    -   **Reference Code (`app/__init__.py`)**:
+        ```python
+        from .server.environment import ComplianceEnv
+        from .client import ComplianceEnvClient
+
+        __all__ = ["ComplianceEnv", "ComplianceEnvClient"]
+        ```
+
+6.  **Create `app/client.py` with an `HTTPEnvClient` subclass** for remote environment usage.
+    -   **Why it's important**: This gives model training scripts and evaluation tools a clean client wrapper instead of raw HTTP calls, making integration with RL pipelines easier and less error-prone.
+    -   **How to do it**:
+        1.  Import `HTTPEnvClient` from the OpenEnv client package.
+        2.  Subclass it and set defaults like base URL and timeout.
+        3.  Add helper methods if needed (for example, typed wrappers around `/reset` and `/step`).
+    -   **Reference Code (`app/client.py`)**:
+        ```python
+        from openenv.client import HTTPEnvClient
+
+
+        class ComplianceEnvClient(HTTPEnvClient):
+            def __init__(self, base_url: str = "http://localhost:7860"):
+                super().__init__(base_url=base_url)
+        ```
+
+7.  **Add server app in `app/server/app.py`** using `create_hf_web_interface_app` and expose `/reset`, `/step`, `/state`, `/tasks`, `/grader`, `/baseline`.
+    -   **Why it's important**: This aligns runtime serving with the revised server module layout and enables Hugging Face web interface compatibility from the beginning.
+    -   **How to do it**:
+        1.  In `app/server/app.py`, import `FastAPI`, your models, the env class from `app/server/environment.py`, and `create_hf_web_interface_app`.
+        2.  Initialize a base API app and env instance.
         3.  For each endpoint, create a function with a FastAPI decorator, like `@app.post("/step")`.
         4.  The function should accept the corresponding Pydantic model as an argument (e.g., `async def step(action: ComplianceAction):`).
-        5.  For now, just return a simple dictionary: `return {"status": "ok", "action_received": action.action_type}`.
-    -   **Reference Code (`app/main.py`)**:
+        5.  Wrap the API app using `create_hf_web_interface_app` and expose the wrapped app variable.
+    -   **Reference Code (`app/server/app.py`)**:
         ```python
         from fastapi import FastAPI
-        from .models import ComplianceAction
+        from app.models import ComplianceAction
+        from app.server.environment import ComplianceEnv
+        from openenv.server import create_hf_web_interface_app
 
-        app = FastAPI()
+        api_app = FastAPI()
+        env = ComplianceEnv()
 
-        @app.post("/step")
+        @api_app.post("/step")
         async def step(action: ComplianceAction):
             # Placeholder logic
             return {"status": "ok", "action_received": action.action_type}
+
+        app = create_hf_web_interface_app(api_app)
         ```
 
-6.  **Share a sample request/response JSON in team chat** so everyone uses the same format.
+8.  **Share a sample request/response JSON in team chat** so everyone uses the same format.
     -   **Why it's important**: By sharing concrete examples of what the API expects as input and what it will send as output, you provide a clear guide for your teammates and remove any ambiguity.
     -   **How to do it**: Based on your Pydantic models, write out a JSON object in a text file. For a `ResolveTicket` action, it would look like: `{"action_type": "ResolveTicket", "decision": "Approve", "reason": "All documents are in order."}`. Post this in the team chat.
     -   **Reference Code (Sample JSON for a `curl` command)**:
@@ -106,7 +142,7 @@ Create a runnable project skeleton and lock API/data schemas.
 
 ### Required Handoffs
 - To Sanya (by 14:00): final schema field names and accepted values.
-- To Vedika (by EOD): working local server command (`uvicorn app.main:app --reload`) and endpoint payload examples.
+- To Vedika (by EOD): working local server command (`uvicorn app.server.app:app --reload`) and endpoint payload examples.
 
 ## Day 2 - Core Environment Logic
 
@@ -114,14 +150,14 @@ Create a runnable project skeleton and lock API/data schemas.
 Implement environment transitions and reward behavior.
 
 ### Tasks
-1.  **Build `ComplianceEnv` in `app/environment.py`** with `reset()`, `step()`, `state()`.
+1.  **Build `ComplianceEnv` in `app/server/environment.py`** with `reset()`, `step()`, `state()`.
     -   **Why it's important**: This is the heart of the simulation. The `reset` method will start a new problem (episode), and the `step` method will contain the logic to process an incoming agent action, calculate the reward, and produce the next observation for the agent.
     -   **How to do it**:
         1.  Create a `ComplianceEnv` class.
         2.  The `__init__` method can load the policy and claims data from the `data/` directory.
         3.  The `reset(task_id)` method should select a claim from the dataset, set the initial state (like `step_count = 1`), and return the first observation.
         4.  The `step(action)` method will contain the core logic for how the environment changes in response to an agent's action.
-    -   **Reference Code (`app/environment.py`)**:
+    -   **Reference Code (`app/server/environment.py`)**:
         ```python
         class ComplianceEnv:
             def __init__(self):
@@ -170,21 +206,21 @@ Implement environment transitions and reward behavior.
             return self.current_observation, reward, done, info
         ```
 
-4.  **Integrate env methods into FastAPI endpoints**.
+4.  **Integrate env methods into FastAPI endpoints in `app/server/app.py`**.
     -   **Why it's important**: You will connect your `ComplianceEnv` methods to the placeholder API endpoints you created on Day 1. Now, when a request hits `/step`, it will actually call your `env.step()` method and return a real result.
     -   **How to do it**:
-        1.  In `app/main.py`, create a single instance of your environment: `env = ComplianceEnv()`.
+        1.  In `app/server/app.py`, create a single instance of your environment: `env = ComplianceEnv()`.
         2.  In your endpoint functions (e.g., `async def step(action: ComplianceAction):`), call the corresponding environment method: `obs, reward, done, info = env.step(action)`.
         3.  Return the results in a JSON response.
-    -   **Reference Code (`app/main.py`)**:
+    -   **Reference Code (`app/server/app.py`)**:
         ```python
         # ... imports
-        from .environment import ComplianceEnv
+        from app.server.environment import ComplianceEnv
 
-        app = FastAPI()
+        api_app = FastAPI()
         env = ComplianceEnv() # Create one instance
 
-        @app.post("/step")
+        @api_app.post("/step")
         async def step(action: ComplianceAction):
             obs, reward, done, info = env.step(action)
             return {"observation": obs, "reward": reward, "done": done, "info": info}
@@ -211,6 +247,7 @@ Implement environment transitions and reward behavior.
 ### Required Handoffs
 - To Sanya: confirm any schema updates before she regenerates full dataset.
 - To Vedika: share final expected behavior for invalid actions and max-step termination.
+- To both teammates: share stable imports from `app/__init__.py` and usage note for `app/client.py`.
 
 ## Day 3 - Integration and Final Polish
 

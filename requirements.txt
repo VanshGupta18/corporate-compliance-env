@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+pytest
+openenv-core
+requests
+gradio
+huggingface-hub

@@ -58,7 +58,7 @@ Prepare policy text and a reliable claim schema draft.
 
 4.  **Review sample claim format with Vansh** to ensure schema alignment.
     -   **Why it's important**: This quick check prevents major rework later. By confirming your data structure matches Vansh's backend schemas early, you ensure both parts of the project will fit together perfectly.
-    -   **How to do it**: Copy one complete JSON claim object from your `claims.json` file, paste it into the team chat, and ask Vansh: "Does this structure match the Pydantic models you are creating?"
+    -   **How to do it**: Copy one complete JSON claim object from your `claims.json` file, paste it into the team chat, and ask Vansh: "Does this structure match the Pydantic models and observation fields used in `app/models.py` and `app/server/environment.py`?"
     -   **Reference Code (Team chat message)**:
         ```
         @Vansh Here is a sample claim object. Can you confirm this matches your Pydantic schema for the observation space?
@@ -84,11 +84,13 @@ Prepare policy text and a reliable claim schema draft.
 
 ### Dependency Notes
 - You can start policy writing immediately.
-- Before finalizing claim JSON structure, wait for Vansh schema confirmation from Day 1.
+- Before finalizing claim JSON structure, wait for Vansh schema confirmation from Day 1 (`app/models.py` + `app/server/environment.py`).
+- Wait for Vansh to confirm that exported imports in `app/__init__.py` are stable, so field names are locked for client/framework use.
 - Vedika needs your edge-case list before she can design good grader tests.
 
 ### Required Handoffs
 - To Vansh (by 14:00): final policy terminology and rule keyword list.
+- To Vansh (by EOD): confirmation that dataset fields match what `app/client.py` and `/reset`/`/step` flows consume.
 - To Vedika (by EOD): sample claims + expected outcomes for tricky cases.
 
 ## Day 2 - Dataset Generation and Validation
@@ -160,7 +162,7 @@ Generate full synthetic dataset and verify quality.
     -   **Reference Code**: N/A (This is a communication task).
 
 ### Dependency Notes
-- Start after Vansh confirms no further schema changes.
+- Start after Vansh confirms no further schema changes in `app/models.py` and `app/server/environment.py`.
 - Start deeper validation after Vedika points out gaps found in early tests.
 
 ### Required Handoffs

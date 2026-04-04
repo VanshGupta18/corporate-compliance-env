@@ -51,9 +51,12 @@ mirroring how a real compliance officer navigates incomplete files.
 corporate-policy-compliance-env/
 │
 ├── app/
-│   ├── main.py               # FastAPI server — all endpoints
-│   ├── environment.py        # ComplianceEnv class (reset/step/state)
+│   ├── __init__.py           # Exports for RL frameworks (env + client)
 │   ├── models.py             # All Pydantic schemas
+│   ├── client.py             # HTTPEnvClient subclass for remote usage
+│   ├── server/
+│   │   ├── environment.py    # ComplianceEnv class (reset/step/state)
+│   │   └── app.py            # FastAPI app + HF web interface wrapper
 │   ├── graders.py            # Deterministic grader for all 3 tasks
 │   └── baseline.py           # Baseline inference script (OpenAI API)
 │
@@ -398,7 +401,7 @@ pip install -r requirements.txt
 ### 2. Run the Server
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 7860
+uvicorn app.server.app:app --host 0.0.0.0 --port 7860
 ```
 
 ### 3. Validate Against OpenEnv Spec
@@ -446,7 +449,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 EXPOSE 7860
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "app.server.app:app", "--host", "0.0.0.0", "--port", "7860"]
 ```
 
 ---

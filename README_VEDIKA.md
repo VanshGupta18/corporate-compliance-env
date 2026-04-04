@@ -24,22 +24,49 @@ Set up a beginner-friendly testing workflow and validate initial API behavior.
         ```python
         import pytest
 
-        def test_example_passing():
-            assert 1 + 1 == 2
+        # --- Placeholder tests for Day 2 implementation ---
 
-        def test_example_failing():
-            assert 1 + 1 == 3
+        # Grader tests for 'easy' tasks
+        def test_easy_grader_correct_approval():
+            """Tests grader gives full score for a correct 'Approve' on an easy task."""
+            pass
+
+        def test_easy_grader_correct_rejection():
+            """Tests grader gives full score for a correct 'Reject' on an easy task."""
+            pass
+
+        # ... more placeholder tests
         ```
 
 2.  **Create smoke tests for endpoint availability** (`/tasks`, `/reset`, `/state`).
     -   **Why it's important**: These are basic, preliminary tests to check for fundamental problems. You will write tests to confirm that the API endpoints exist and don't crash when called. This provides rapid feedback to Vansh that his initial server setup is working.
-    -   **How to do it**:
-        1.  In your test file, you will need a client to make web requests. The `requests` library is good for this.
-        2.  Write a test function that makes a `GET` request to Vansh's running server (e.g., `http://localhost:7860/tasks`).
-        3.  Use an `assert` statement to check that the response status code is 200 (OK). Example: `assert response.status_code == 200`.
-    -   **Reference Code (`tests/test_api.py`)**:
-        ```python
-        import requests
+        import pytest
+
+        API_URL = "http://localhost:7860"
+
+        def test_tasks_endpoint_is_available():
+            """
+            Smoke test to check if the /tasks endpoint is running and returns a valid structure.
+            """
+            try:
+                response = requests.get(f"{API_URL}/tasks")
+                assert response.status_code == 200
+                data = response.json()
+                assert "tasks" in data
+                assert "action_schema" in data
+            except requests.exceptions.ConnectionError:
+                pytest.fail(f"Could not connect to the API server at {API_URL}.")
+
+        def test_reset_endpoint_works_for_all_tasks():
+            """
+            Smoke test to ensure the /reset endpoint works for all task difficulties.
+            """
+            for task_id in ["easy", "medium", "hard"]:
+                try:
+                    response = requests.post(f"{API_URL}/reset", params={"task_id": task_id})
+                    assert response.status_code == 200
+                except requests.exceptions.ConnectionError:
+                    pytest.fail(f"Could not connect to the API server at {API_URL}."
 
         API_URL = "http://localhost:7860"
 
@@ -56,22 +83,39 @@ Set up a beginner-friendly testing workflow and validate initial API behavior.
         ```markdown
         ### 5. Run Tests
 
-        ```bash
-        pytest -v
-        ```
-        ```
+        ``Placeholder tests for edge cases identified by Sanya
 
-4.  **Build a shared issue list template for bugs**: endpoint, input, actual output, expected output.
-    -   **Why it's important**: A standardized template for reporting bugs makes communication with Vansh and Sanya efficient. It ensures they have all the information they need to understand and fix the problem quickly.
-    -   **How to do it**: Create a simple text file or a shared document (like a Google Doc) with a template. Post the template in the team chat:
-        `**Bug Report**`
-        `- **Endpoint**: (e.g., /step)`
-        `- **Input Sent**: (Paste the JSON here)`
-        `- **Expected Output**: (Describe what should have happened)`
-        `- **Actual Output**: (Describe what actually happened)`
-    -   **Reference Code**: N/A (This is a communication/documentation task).
+        def test_rejects_claim_just_over_receipt_limit():
+            """Corresponds to Sanya's edge case: Meal just over limit (e.g., ₹2,001)."""
+            # TODO: Implement this test on Day 2
+            pass
 
-5.  **Review Sanya's edge-case list and map each case to future tests**.
+        def test_approves_claim_just_under_receipt_limit():
+            """Corresponds to Sanya's edge case: Meal just under limit (e.g., ₹1,999)."""
+            # TODO: Implement this test on Day 2
+            pass
+        
+        def test_rejects_claim_with_alcohol():
+            """Corresponds to Sanya's edge case: Bill contains alcohol.""" reporting bugs makes communication with Vansh and Sanya efficient. It ensures they have all the information they need to understand and fix the problem quickly.
+    -   **How to do it**: Create a simple te.py`)**:
+        ```python
+        import pytest
+        from app.client import ComplianceEnvClient
+
+        API_URL = "http://localhost:7860"
+
+        @pytest.fixture
+        def client():
+            """Provides a ComplianceEnvClient instance for tests."""
+            return ComplianceEnvClient(base_url=API_URL)
+
+        def test_client_can_reset_environment(client: ComplianceEnvClient):
+            """
+            Tests that the client can successfully call the /reset endpoint.
+            """
+            observation = client.reset(task_id="easy")
+            assert isinstance(observation, dict)
+            assert "message" in observationnd map each case to future tests**.
     -   **Why it's important**: You will take the list of tricky cases from Sanya and start planning how you will write specific tests for them on Day 2. This preparation ensures that your tests will be comprehensive and meaningful.
     -   **How to do it**: For each edge case Sanya provides, write a placeholder test function in your `test_graders.py` file. The function can be empty for now, just with a descriptive name. Example: `def test_rejects_claim_just_over_receipt_limit(): pass`.
     -   **Reference Code (`tests/test_graders.py`)**:
@@ -87,12 +131,28 @@ Set up a beginner-friendly testing workflow and validate initial API behavior.
             pass
         ```
 
+6.  **Add one smoke test using `app/client.py` (`HTTPEnvClient` subclass)**.
+    -   **Why it's important**: This validates the client abstraction layer that RL scripts will use, not just raw HTTP requests. It catches integration bugs early (wrong paths, request/response mismatch, serialization issues).
+    -   **How to do it**: Import Vansh's client class from `app/client.py`, call `reset("easy")`, then send one simple step action and assert the response has expected keys.
+    -   **Reference Code (`tests/test_client_smoke.py`)**:
+        ```python
+        from app.client import ComplianceEnvClient
+
+
+        def test_client_can_reset():
+            client = ComplianceEnvClient(base_url="http://localhost:7860")
+            obs = client.reset(task_id="easy")
+            assert "ticket_id" in obs
+        ```
+
 ### Dependency Notes
-- Wait for Vansh to provide running API server + sample payloads before endpoint smoke tests.
+- Wait for Vansh to provide running API server from `app/server/app.py` + sample payloads before endpoint smoke tests.
+- Wait for Vansh to share `app/client.py` class name/signature before client smoke test.
 - Wait for Sanya edge-case handoff before building strong grader test plan.
 
 ### Required Handoffs
 - To Vansh: endpoint failures or ambiguous behavior with reproducible test inputs.
+- To Vansh: client integration failures (if `app/client.py` behavior differs from direct API behavior).
 - To Sanya: unclear/ambiguous data cases found during smoke-test review.
 
 ## Day 2 - Grader and Behavior Testing

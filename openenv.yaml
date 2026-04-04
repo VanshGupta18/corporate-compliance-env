@@ -1,0 +1,152 @@
+name: corporate-compliance-env
+version: "1.0.0"
+description: >
+  An OpenEnv-compliant RL environment that simulates corporate policy compliance.
+  Agents must understand expense claims, search policy documents, and make compliant
+  decisions as an AI Compliance Officer.
+
+author: Vansh Gupta
+organization: Meta
+
+# Task definitions
+tasks:
+  - id: easy
+    name: single_step_classification
+    description: >
+      Self-contained ticket with all information visible.
+      Agent must immediately call ResolveTicket.
+    max_steps: 3
+    expected_steps: 1
+    difficulty: easy
+
+  - id: medium
+    name: policy_retrieval
+    description: >
+      Ticket provided but policy rule is hidden.
+      Agent must SearchPolicy first, then resolve.
+    max_steps: 5
+    expected_steps: 2
+    difficulty: medium
+
+  - id: hard
+    name: multi_turn_contextual_decision
+    description: >
+      Ticket has missing documents. Agent must identify them,
+      request information, and make contextual decisions.
+    max_steps: 8
+    expected_steps: "3-4"
+    difficulty: hard
+
+# Action space definition
+action:
+  type: object
+  required:
+    - action_type
+  properties:
+    action_type:
+      type: string
+      enum:
+        - SearchPolicy
+        - RequestInformation
+        - ResolveTicket
+    query:
+      type: string
+      description: For SearchPolicy actions
+    message:
+      type: string
+      description: For RequestInformation actions
+    decision:
+      type: string
+      enum:
+        - Approve
+        - Reject
+        - Escalate
+      description: For ResolveTicket actions
+    reason:
+      type: string
+      description: For ResolveTicket actions
+
+# Observation space definition
+observation:
+  type: object
+  properties:
+    ticket_id:
+      type: string
+    employee_name:
+      type: string
+    employee_role:
+      type: string
+    employee_level:
+      type: string
+    amount:
+      type: number
+    currency:
+      type: string
+    description:
+      type: string
+    has_receipt:
+      type: boolean
+    missing_document:
+      type: ["string", "null"]
+    rule_keyword:
+      type: string
+    risk_score:
+      type: number
+      minimum: 0
+      maximum: 1
+    env_message:
+      type: string
+    step_count:
+      type: integer
+    max_steps:
+      type: integer
+
+# Reward function specification
+reward:
+  min: -1.0
+  max: 1.0
+  distribution: sparse  # Mostly 0, non-zero on key events
+  events:
+    - name: correct_resolve
+      value: 1.0
+      description: Correct ResolveTicket decision
+    - name: relevant_search
+      value: 0.1
+      description: Relevant SearchPolicy query
+    - name: correct_request
+      value: 0.1
+      description: Correct RequestInformation
+    - name: wrong_resolve
+      value: -1.0
+      description: Wrong ResolveTicket (terminal)
+    - name: max_steps_penalty
+      value: -0.5
+      description: Exceeded max_steps
+    - name: invalid_action
+      value: -0.1
+      description: Malformed action
+
+# Episode specifications
+episode:
+  max_steps_by_task:
+    easy: 3
+    medium: 5
+    hard: 8
+  termination:
+    - on_resolve_ticket: Always terminates episode
+    - on_max_steps: Penalty applied, episode ends
+    - on_wrong_resolve: Immediate -1.0, episode ends
+
+# Metadata
+tags:
+  - reinforcement-learning
+  - compliance
+  - policy
+  - decision-making
+  - multi-step
+  - retrieval
+
+environment:
+  type: web
+  protocol: websocket
+  benchmark: corporate-compliance-v1
