@@ -42,7 +42,7 @@ dev = [
 ]
 
 [project.scripts]
-server = "app.server.app:main"
+server = "server.app:main"
 
 [project.urls]
 Homepage = "https://github.com/VanshGupta18/corporate-compliance-env"
