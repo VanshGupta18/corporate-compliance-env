@@ -10,25 +10,32 @@ from typing import Dict, Any, Optional
 class BaselineAgent:
     """Simple baseline agent with hardcoded heuristic policy."""
     
-    def __init__(self, api_url: str = "http://localhost:8000"):
+    def __init__(self, api_url: str = "http://localhost:7860"):
         self.api_url = api_url
         self.session = requests.Session()
+        self.current_state = None
     
     def reset(self, task_id: str = "easy") -> Dict[str, Any]:
         """Start a new episode."""
-        response = self.session.post(f"{self.api_url}/ws", json={"method": "reset", "task_id": task_id})
+        response = self.session.post(
+            f"{self.api_url}/reset", 
+            json={"task_id": task_id}
+        )
         response.raise_for_status()
         return response.json()
     
     def step(self, action: Dict[str, Any]) -> Dict[str, Any]:
         """Take a step in the environment."""
-        response = self.session.post(f"{self.api_url}/ws", json={"method": "step", "action": action})
+        response = self.session.post(
+            f"{self.api_url}/step", 
+            json=action
+        )
         response.raise_for_status()
         return response.json()
     
     def get_state(self) -> Dict[str, Any]:
         """Get current episode state."""
-        response = self.session.get(f"{self.api_url}/ws")
+        response = self.session.get(f"{self.api_url}/state")
         response.raise_for_status()
         return response.json()
     

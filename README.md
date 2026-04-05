@@ -441,7 +441,7 @@ The agent's rulebook covers:
 }
 ```
 
-**Distribution:** 40 Easy / 35 Medium / 25 Hard
+**Distribution:** 33 Easy / 33 Medium / 34 Hard (100 total claims)
 **Split:** 80 training / 20 held-out evaluation
 
 ### `data/generate_dataset.py`

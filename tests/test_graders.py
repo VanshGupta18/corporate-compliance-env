@@ -7,7 +7,6 @@ API_URL = "http://localhost:8000"
 # --- Grader Tests for 'easy' tasks ---
 # NOTE: Using .sync() context manager to keep WebSocket connection open through episode
 
-@pytest.mark.skip(reason="Test needs implementation - placeholder for grader testing")
 def test_easy_grader_correct_approval():
     """Tests grader gives full score for a correct 'Approve' on an easy task."""
     with ComplianceEnvClient(base_url=API_URL).sync() as client:
@@ -24,7 +23,6 @@ def test_easy_grader_correct_approval():
         # Check that episode terminated
         assert done == True
 
-@pytest.mark.skip(reason="Test needs implementation - placeholder for grader testing")
 def test_easy_grader_correct_rejection():
     """Tests grader gives full score for a correct 'Reject' on an easy task."""
     with ComplianceEnvClient(base_url=API_URL).sync() as client:
@@ -36,7 +34,6 @@ def test_easy_grader_correct_rejection():
         done = response.get("done") if isinstance(response, dict) else response.done
         assert done == True
 
-@pytest.mark.skip(reason="Test needs implementation - placeholder for grader testing")
 def test_easy_grader_incorrect_decision():
     """Tests grader gives negative score for an incorrect decision on an easy task."""
     with ComplianceEnvClient(base_url=API_URL).sync() as client:

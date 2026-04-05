@@ -20,12 +20,15 @@ class ComplianceEnv(Environment):
         
         self._state = ComplianceState()
         self._current_claim = None  # Store current claim
-        self.max_steps = 5
+        self.max_steps = 5  # Default, will be set per task in reset()
+        # Task-based max_steps: Easy=3, Medium=5, Hard=8
+        self.task_max_steps = {"easy": 3, "medium": 5, "hard": 8}
 
     def reset(self, seed=None, episode_id=None, **kwargs):
-        self._state.step_count = 0
-        
         task_id = kwargs.get("task_id", "easy")
+        # Set max_steps based on task difficulty
+        self.max_steps = self.task_max_steps.get(task_id, 5)
+        
         # Filter claims by task_difficulty
         filtered_claims = [claim for claim in self.claims if claim["task_difficulty"] == task_id]
         if not filtered_claims:
@@ -36,6 +39,7 @@ class ComplianceEnv(Environment):
 
         self._state = ComplianceState(
             episode_id=episode_id or str(uuid.uuid4()),
+            task_id=task_id,
             step_count=0,
             is_done=False,
         )
@@ -47,9 +51,24 @@ class ComplianceEnv(Environment):
         reward = 0.0
         done = False
 
-        # Action validation
-        if action.action_type == "SearchPolicy" and not action.query:
-            reward = -0.1
+        # SearchPolicy action handling
+        if action.action_type == "SearchPolicy":
+            if not action.query:
+                reward = -0.1  # Penalty for empty query
+            else:
+                reward = 0.1  # Reward for valid search query
+            self._state.rewards_history.append(reward)
+            self._state.actions_history.append(action.model_dump())
+            self._state.cumulative_reward += reward
+            return self._get_observation()
+
+        # RequestInformation action handling
+        if action.action_type == "RequestInformation":
+            # Check if there's a missing document to request
+            if self._current_claim.get("missing_document"):
+                reward = 0.1  # Correct to request missing info
+            else:
+                reward = -0.2  # Penalty for unnecessary info request
             self._state.rewards_history.append(reward)
             self._state.actions_history.append(action.model_dump())
             self._state.cumulative_reward += reward

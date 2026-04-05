@@ -26,6 +26,7 @@ class ComplianceObservation(Observation):
     max_steps: int
 
 class ComplianceState(State):
+    task_id: Optional[str] = None
     current_observation: Optional[ComplianceObservation] = None
     actions_history: List[Dict[str, Any]] = Field(default_factory=list)
     rewards_history: List[float] = Field(default_factory=list)
