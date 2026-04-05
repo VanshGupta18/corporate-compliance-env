@@ -5,6 +5,7 @@ from app.graders import grade_episode
 from app.baseline import BaselineAgent
 from fastapi import FastAPI
 import json
+import uvicorn
 from pathlib import Path
 
 # Create the main app using OpenEnv
@@ -149,4 +150,13 @@ async def run_baseline():
         "baseline_results": results,
         "average_score": sum([r.get("score", 0) for r in results.values()]) / 3
     }
+
+
+def main():
+    """Main entry point for the server."""
+    uvicorn.run(app, host="0.0.0.0", port=7860)
+
+
+if __name__ == "__main__":
+    main()
 

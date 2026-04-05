@@ -13,4 +13,4 @@ COPY . .
 EXPOSE 7860
 
 # Run Uvicorn server
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
+CMD ["uvicorn", "app.server.app:app", "--host", "0.0.0.0", "--port", "7860"]
