@@ -114,7 +114,7 @@ docker build -t compliance-env .
 docker run -p 8000:8000 compliance-env
 
 # Validate against OpenEnv spec
-openenv validate --url https://vanshg1810-corporate-compliance-env.hf.space --verbose
+openenv validate --url http://localhost:8000 --verbose
 ```
 
 ### Run the LLM Inference Agent
