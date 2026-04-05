@@ -54,7 +54,6 @@ build/
 site/
 
 # ── uv / pip ─────────────────────────────────────────
-uv.lock
 pip-wheel-metadata/
 *.whl
 
