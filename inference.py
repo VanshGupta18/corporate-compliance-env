@@ -197,9 +197,7 @@ def parse_model_response(response_text: str) -> Optional[Dict]:
 
 def run_episode(client: Any, task_id: str) -> Dict:
     """Run a single episode on the given task."""
-    print(f"\n{'='*60}")
-    print(f"Running Episode: {task_id.upper()}")
-    print(f"{'='*60}")
+    print(f"START; task_id={task_id}")
 
     # Reset environment
     reset_result = client.reset(task_id=task_id)
@@ -215,10 +213,6 @@ def run_episode(client: Any, task_id: str) -> Dict:
     }
 
     for step in range(1, MAX_STEPS_PER_TASK + 1):
-        print(f"\n--- Step {step} ---")
-        print(f"Ticket: {observation.ticket_id} | Risk: {observation.risk_score:.2f}")
-        print(f"Amount: ₹{observation.amount} | Missing: {observation.missing_document}")
-
         # Build prompt for LLM
         obs_dict = observation.model_dump() if hasattr(observation, 'model_dump') else observation.__dict__
         user_prompt = build_user_prompt(obs_dict, task_id, step)
@@ -254,18 +248,16 @@ def run_episode(client: Any, task_id: str) -> Dict:
                 "reason": action_dict.get("reason"),
             }
             action = ComplianceAction(**action_data)
-            print(f"Fallback Action: {action.action_type}")
-            if action.decision:
-                print(f"  Decision: {action.decision}")
             step_result = client.step(action)
             observation = step_result.observation
             reward = step_result.reward or 0.0
-            print(f"Reward: {reward:+.2f} | Done: {step_result.done}")
+            
+            print(f"STEP; step={step}; action={action.action_type}; reward={reward:+.2f}; done={step_result.done}")
+
             episode_data["steps"].append({"step": step, "action": action.action_type, "reward": reward})
             episode_data["total_reward"] += reward
             if step_result.done:
                 episode_data["done"] = True
-                print(f"\nEpisode complete!")
                 break
             continue
 
@@ -286,20 +278,13 @@ def run_episode(client: Any, task_id: str) -> Dict:
 
         # Create action
         action = ComplianceAction(**action_data)
-        print(f"Action: {action.action_type}")
-        if action.query:
-            print(f"  Query: {action.query}")
-        if action.message:
-            print(f"  Message: {action.message}")
-        if action.decision:
-            print(f"  Decision: {action.decision}")
 
         # Step environment
         step_result = client.step(action)
         observation = step_result.observation
         reward = step_result.reward or 0.0
 
-        print(f"Reward: {reward:+.2f} | Done: {step_result.done}")
+        print(f"STEP; step={step}; action={action.action_type}; reward={reward:+.2f}; done={step_result.done}")
 
         episode_data["steps"].append({
             "step": step,
@@ -310,10 +295,10 @@ def run_episode(client: Any, task_id: str) -> Dict:
 
         if step_result.done:
             episode_data["done"] = True
-            print(f"\nEpisode complete!")
             break
 
     episode_data["final_reward"] = episode_data["total_reward"]
+    print(f"END; task_id={task_id}; total_reward={episode_data['final_reward']:+.2f}; steps={len(episode_data['steps'])}")
     return episode_data
 
 
