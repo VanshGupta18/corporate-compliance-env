@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 authors = [
-    {name = "Vansh Gupta", email = "vansh@example.com"}
+    {name = "Vansh Gupta", email = "vanshgupta1810@gmail.com"}
 ]
 keywords = ["reinforcement-learning", "compliance", "openenv", "rl-environment"]
 classifiers = [
