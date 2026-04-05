@@ -5,26 +5,22 @@ from fastapi import FastAPI
 import json
 from pathlib import Path
 
-# Create the base app using OpenEnv
+# Create the main app using OpenEnv
 # This automatically creates /ws, /reset, /step, /state endpoints
-base_app = create_fastapi_app(
+app = create_fastapi_app(
     ComplianceEnv,
     ComplianceAction,
     ComplianceObservation,
 )
 
-# Wrap to add custom endpoints
-app = FastAPI()
-
 # ============================================================================
-# FIX #1: ADD MISSING /tasks ENDPOINT (custom to our compliance environment)
+# ADD CUSTOM /tasks ENDPOINT to the main app
 # ============================================================================
 
 @app.get("/tasks")
 async def get_tasks():
     """
     Returns list of available tasks and their metadata.
-    Fixes: test_tasks_endpoint_is_available blocker
     """
     # Load openenv.yaml to get task definitions
     yaml_path = Path(__file__).parent.parent.parent / "openenv.yaml"
@@ -72,8 +68,4 @@ async def get_tasks():
                 }
             }
         }
-
-# Mount the OpenEnv base app under /env/ and merge endpoints
-for route in base_app.routes:
-    app.routes.append(route)
 
