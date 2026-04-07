@@ -25,10 +25,10 @@ tags:
 
 [![OpenEnv Spec](https://img.shields.io/badge/OpenEnv-Compliant-blue)](https://openenv.dev)
 [![Python](https://img.shields.io/badge/Python-3.10+-green)](https://python.org)
-[![HuggingFace](https://img.shields.io/badge/HuggingFace-Space-orange)](https://huggingface.co/spaces/YOUR_USERNAME/corporate-compliance-env)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-Space-orange)](https://huggingface.co/spaces/mcqueemmater/env-corporate)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-🤗 **Live Space:** `https://huggingface.co/spaces/vanshg1810/corporate-compliance-env`
+🤗 **Live Space:** `https://huggingface.co/spaces/mcqueemmater/env-corporate`
 
 ---
 
@@ -102,13 +102,13 @@ The agent can also:
 
 ### Use the Live Space
 
-Visit the running instance: **https://huggingface.co/spaces/vanshg1810/corporate-compliance-env**
+Visit the running instance: **https://huggingface.co/spaces/mcqueemmater/env-corporate**
 
 ### Run Locally with Docker
 
 ```bash
 # Clone and build
-git clone https://huggingface.co/spaces/vanshg1810/corporate-compliance-env
+git clone https://huggingface.co/spaces/mcqueemmater/env-corporate
 cd corporate-compliance-env
 docker build -t compliance-env .
 docker run -p 8000:8000 compliance-env

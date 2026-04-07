@@ -65,7 +65,7 @@ class ComplianceEnv(Environment):
         # RequestInformation action handling
         if action.action_type == "RequestInformation":
             # Check if there's a missing document to request
-            if self._current_claim.get("missing_document"):
+            if self._current_claim and self._current_claim.get("missing_document"):
                 reward = 0.1  # Correct to request missing info
             else:
                 reward = -0.2  # Penalty for unnecessary info request
@@ -82,7 +82,7 @@ class ComplianceEnv(Environment):
                 self._state.cumulative_reward += reward
                 return self._get_observation()
 
-            is_correct = (action.decision == self._current_claim["ground_truth_decision"])
+            is_correct = (self._current_claim and action.decision == self._current_claim.get("ground_truth_decision"))
             reward = 1.0 if is_correct else -1.0
             done = True
             self._state.is_done = done

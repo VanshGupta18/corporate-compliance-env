@@ -25,7 +25,7 @@ from app.models import ComplianceAction, ComplianceObservation
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
-COMPLIANCE_API = os.getenv("COMPLIANCE_API", "https://vanshg1810-corporate-compliance-env.hf.space")
+COMPLIANCE_API = os.getenv("COMPLIANCE_API", "https://mcqueemmater-env-corporate.hf.space")
 
 # ===== Task Configuration =====
 TASKS = ["easy", "medium", "hard"]
