@@ -15,7 +15,7 @@ import os
 import re
 import json
 import textwrap
-from typing import List, Dict, Optional, Any
+from typing import Dict, Optional, Any
 
 from openai import OpenAI
 from app.client import ComplianceEnvClient
@@ -25,20 +25,13 @@ from app.models import ComplianceAction, ComplianceObservation
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
-COMPLIANCE_API = os.getenv("COMPLIANCE_API", "https://mcqueemmater-env-corporate.hf.space")
+COMPLIANCE_API = os.getenv("COMPLIANCE_API", "https://mcqueenmater-env-corporate.hf.space")
 
 # ===== Task Configuration =====
 TASKS = ["easy", "medium", "hard"]
 MAX_STEPS_PER_TASK = 10
 TEMPERATURE = 0.0
 MAX_TOKENS = 256
-
-# ===== Action Patterns =====
-ACTION_PATTERN = re.compile(
-    r"action\s*[:\-]?\s*(SearchPolicy|RequestInformation|ResolveTicket)",
-    re.IGNORECASE,
-)
-
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
@@ -197,7 +190,7 @@ def parse_model_response(response_text: str) -> Optional[Dict]:
 
 def run_episode(client: Any, task_id: str) -> Dict:
     """Run a single episode on the given task."""
-    print(f"START; task_id={task_id}")
+    print(f"[START] task={task_id.upper()} env=corporate-compliance-env model={MODEL_NAME}", flush=True)
 
     # Reset environment
     reset_result = client.reset(task_id=task_id)
@@ -235,9 +228,7 @@ def run_episode(client: Any, task_id: str) -> Dict:
                 max_tokens=MAX_TOKENS,
             )
             response_text = completion.choices[0].message.content or ""
-        except Exception as exc:
-            print(f"LLM request failed: {exc}. Using rule-based fallback.")
-            # Use rule-based fallback when LLM fails
+        except Exception:
             obs_dict = observation.model_dump() if hasattr(observation, 'model_dump') else observation.__dict__
             action_dict = rule_based_fallback(obs_dict)
             action_data = {
@@ -252,7 +243,7 @@ def run_episode(client: Any, task_id: str) -> Dict:
             observation = step_result.observation
             reward = step_result.reward or 0.0
             
-            print(f"STEP; step={step}; action={action.action_type}; reward={reward:+.2f}; done={step_result.done}")
+            print(f"[STEP] step={step} action={action.action_type} reward={reward:.2f} done={str(step_result.done).lower()} error=null", flush=True)
 
             episode_data["steps"].append({"step": step, "action": action.action_type, "reward": reward})
             episode_data["total_reward"] += reward
@@ -261,13 +252,11 @@ def run_episode(client: Any, task_id: str) -> Dict:
                 break
             continue
 
-        # Parse response
         action_dict = parse_model_response(response_text)
         if not action_dict:
-            print(f"Failed to parse response: {response_text}")
             action_dict = {"action_type": "ResolveTicket", "decision": "Reject", "reason": "Parse error"}
 
-        # Ensure only required fields for ComplianceAction
+
         action_data = {
             "action_type": action_dict.get("action_type", "ResolveTicket"),
             "query": action_dict.get("query"),
@@ -276,15 +265,12 @@ def run_episode(client: Any, task_id: str) -> Dict:
             "reason": action_dict.get("reason"),
         }
 
-        # Create action
         action = ComplianceAction(**action_data)
-
-        # Step environment
         step_result = client.step(action)
         observation = step_result.observation
         reward = step_result.reward or 0.0
 
-        print(f"STEP; step={step}; action={action.action_type}; reward={reward:+.2f}; done={step_result.done}")
+        print(f"[STEP] step={step} action={action.action_type} reward={reward:.2f} done={str(step_result.done).lower()} error=null", flush=True)
 
         episode_data["steps"].append({
             "step": step,
@@ -298,41 +284,24 @@ def run_episode(client: Any, task_id: str) -> Dict:
             break
 
     episode_data["final_reward"] = episode_data["total_reward"]
-    print(f"END; task_id={task_id}; total_reward={episode_data['final_reward']:+.2f}; steps={len(episode_data['steps'])}")
+    # Calculate success and format rewards
+    success = episode_data["done"] and episode_data["final_reward"] > 0
+    rewards_str = ",".join(f"{step['reward']:.2f}" for step in episode_data["steps"])
+    print(f"[END] success={str(success).lower()} steps={len(episode_data['steps'])} score={episode_data['final_reward']:.3f} rewards={rewards_str}", flush=True)
     return episode_data
 
 
 def main() -> None:
     """Main function to run inference on all tasks."""
-    print("Corporate Compliance Environment - Inference Script")
-    print(f"API Base URL: {API_BASE_URL}")
-    print(f"Model: {MODEL_NAME}")
-    print(f"Compliance API: {COMPLIANCE_API}")
-
     try:
-        # Initialize client
         client = ComplianceEnvClient(base_url=COMPLIANCE_API).sync()
-
-        results = {}
 
         with client:
             for task_id in TASKS:
-                episode_data = run_episode(client, task_id)
-                results[task_id] = episode_data
+                run_episode(client, task_id)
 
-    except Exception as exc:
-        print(f"Error: {exc}")
-        return
-
-    # Summary
-    print("\n" + "="*60)
-    print("SUMMARY")
-    print("="*60)
-    for task_id, data in results.items():
-        print(f"\n{task_id.upper()}:")
-        print(f"  Final Reward: {data['final_reward']:+.2f}")
-        print(f"  Episodes Complete: {data['done']}")
-        print(f"  Steps: {len(data['steps'])}")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

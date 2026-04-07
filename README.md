@@ -27,7 +27,7 @@ tags:
 [![HuggingFace](https://img.shields.io/badge/HuggingFace-Space-orange)](https://huggingface.co/spaces/mcqueemmater/env-corporate)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
-🤗 **Live Space:** `https://huggingface.co/spaces/mcqueemmater/env-corporate`
+🤗 **Live Space:** `https://huggingface.co/spaces/mcqueenmater/env-corporate`
 
 ---
 

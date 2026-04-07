@@ -47,7 +47,7 @@ server = "server.app:main"
 [project.urls]
 Homepage = "https://github.com/VanshGupta18/corporate-compliance-env"
 Repository = "https://github.com/VanshGupta18/corporate-compliance-env.git"
-Documentation = "https://huggingface.co/spaces/mcqueemmater/env-corporate"
+Documentation = "https://huggingface.co/spaces/mcqueenmater/env-corporate"
 
 [tool.setuptools]
 packages = ["app"]
