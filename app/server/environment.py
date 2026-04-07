@@ -5,6 +5,7 @@ import uuid
 from openenv.core.env_server import Environment
 from app.models import ComplianceAction, ComplianceObservation, ComplianceState
 
+
 class ComplianceEnv(Environment):
     # ✅ Enable concurrent WebSocket sessions
     # This allows multiple clients to connect simultaneously instead of limiting to 1
@@ -24,6 +25,7 @@ class ComplianceEnv(Environment):
         # Task-based max_steps: Easy=3, Medium=5, Hard=8
         self.task_max_steps = {"easy": 3, "medium": 5, "hard": 8}
 
+
     def reset(self, seed=None, episode_id=None, **kwargs):
         task_id = kwargs.get("task_id", "easy")
         # Set max_steps based on task difficulty
@@ -37,6 +39,7 @@ class ComplianceEnv(Environment):
         else:
             self._current_claim = random.choice(filtered_claims)
 
+
         self._state = ComplianceState(
             episode_id=episode_id or str(uuid.uuid4()),
             task_id=task_id,
@@ -46,10 +49,12 @@ class ComplianceEnv(Environment):
         # Return first observation
         return self._get_observation()
 
+
     def step(self, action: ComplianceAction, timeout_s=None, **kwargs):
         self._state.step_count += 1
         reward = 0.0
         done = False
+
 
         # SearchPolicy action handling
         if action.action_type == "SearchPolicy":
@@ -61,6 +66,7 @@ class ComplianceEnv(Environment):
             self._state.actions_history.append(action.model_dump())
             self._state.cumulative_reward += reward
             return self._get_observation()
+
 
         # RequestInformation action handling
         if action.action_type == "RequestInformation":
@@ -74,6 +80,7 @@ class ComplianceEnv(Environment):
             self._state.cumulative_reward += reward
             return self._get_observation()
 
+
         if action.action_type == "ResolveTicket":
             if not action.decision or not action.reason:
                 reward = -0.1
@@ -81,6 +88,7 @@ class ComplianceEnv(Environment):
                 self._state.actions_history.append(action.model_dump())
                 self._state.cumulative_reward += reward
                 return self._get_observation()
+
 
             is_correct = (self._current_claim and action.decision == self._current_claim.get("ground_truth_decision"))
             reward = 1.0 if is_correct else -1.0
@@ -93,18 +101,22 @@ class ComplianceEnv(Environment):
             
             return self._get_observation()
 
+
         if self._state.step_count >= self.max_steps:
             done = True
             reward = -0.5  # Penalty for running out of steps
             self._state.is_done = done
+
 
         self._state.rewards_history.append(reward)
         self._state.actions_history.append(action.model_dump())
         self._state.cumulative_reward += reward
         self._state.is_done = done
 
+
         print(f"Step {self._state.step_count}: Action={action.action_type}, Reward={reward}, Done={done}")
         return self._get_observation()
+
 
     def _get_observation(self):
         if not self._current_claim:
@@ -132,6 +144,7 @@ class ComplianceEnv(Environment):
         )
         self._state.current_observation = obs
         return obs
+
 
     @property
     def state(self):
