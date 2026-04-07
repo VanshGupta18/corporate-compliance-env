@@ -8,6 +8,7 @@ class ComplianceAction(Action):
     message: Optional[str] = None
     decision: Optional[str] = None
     reason: Optional[str] = None
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 class ComplianceObservation(Observation):
     ticket_id: str
