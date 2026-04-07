@@ -24,7 +24,7 @@ tags:
 
 [![OpenEnv Spec](https://img.shields.io/badge/OpenEnv-Compliant-blue)](https://openenv.dev)
 [![Python](https://img.shields.io/badge/Python-3.10+-green)](https://python.org)
-[![HuggingFace](https://img.shields.io/badge/HuggingFace-Space-orange)](https://huggingface.co/spaces/mcqueemmater/env-corporate)
+[![HuggingFace](https://img.shields.io/badge/HuggingFace-Space-orange)](https://huggingface.co/spaces/mcqueenmater/env-corporate)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 🤗 **Live Space:** `https://huggingface.co/spaces/mcqueenmater/env-corporate`
