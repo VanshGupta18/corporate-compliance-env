@@ -16,6 +16,13 @@ app = create_fastapi_app(
     ComplianceObservation,
 )
 
+
+@app.get("/")
+async def root():
+    """Root endpoint for platform readiness checks."""
+    return {"status": "ok", "service": "corporate-compliance-env"}
+
+
 # ============================================================================
 # HEALTH CHECK ENDPOINT
 # ============================================================================
