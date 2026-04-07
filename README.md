@@ -6,7 +6,6 @@ colorTo: green
 sdk: docker
 pinned: false
 app_port: 7860
-base_path: /docs
 app_file: Dockerfile
 tags:
   - openenv

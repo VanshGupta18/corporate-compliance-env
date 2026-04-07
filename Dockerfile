@@ -12,5 +12,5 @@ COPY . .
 # Expose port (HuggingFace Spaces uses 7860)
 EXPOSE 7860
 
-# Run Uvicorn server
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "7860"]
+# Run Uvicorn server with minimal workers for faster startup
+CMD ["uvicorn", "app.server.app:app", "--host", "0.0.0.0", "--port", "7860", "--workers", "1"]
