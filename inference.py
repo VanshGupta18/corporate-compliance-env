@@ -287,7 +287,9 @@ def run_episode(client: Any, task_id: str) -> Dict:
     # Calculate success and format rewards
     success = episode_data["done"] and episode_data["final_reward"] > 0
     rewards_str = ",".join(f"{step['reward']:.2f}" for step in episode_data["steps"])
-    print(f"[END] success={str(success).lower()} steps={len(episode_data['steps'])} score={episode_data['final_reward']:.3f} rewards={rewards_str}", flush=True)
+    # Clamp score to [0, 1] range
+    normalized_score = max(0.0, min(1.0, episode_data["final_reward"]))
+    print(f"[END] success={str(success).lower()} steps={len(episode_data['steps'])} score={normalized_score:.3f} rewards={rewards_str}", flush=True)
     return episode_data
 
 
