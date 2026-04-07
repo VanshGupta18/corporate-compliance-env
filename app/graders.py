@@ -9,18 +9,18 @@ from typing import List, Dict, Any
 def grade_easy(actions_history: List[Dict[str, Any]], ground_truth_decision: str) -> float:
     """
     Easy task: Single-step classification.
-    Score = 1.0 if correct decision, 0.0 otherwise.
+    Score = 0.99 if correct decision, 0.01 otherwise (strictly between 0 and 1).
     """
     if not actions_history:
-        return 0.0
+        return 0.01
     
     final_action = actions_history[-1]
     if final_action.get("action_type") == "ResolveTicket":
         decision = final_action.get("decision")
         if decision == ground_truth_decision:
-            return 1.0
+            return 0.99
     
-    return 0.0
+    return 0.01
 
 
 def grade_medium(actions_history: List[Dict[str, Any]], ground_truth_decision: str) -> float:
@@ -28,12 +28,12 @@ def grade_medium(actions_history: List[Dict[str, Any]], ground_truth_decision: s
     Medium task: Policy retrieval + classification.
     
     Score breakdown:
-    - 1.0: Correct decision AND searched policy
+    - 0.99: Correct decision AND searched policy
     - 0.5: Correct decision but NO search (lucky guess)
-    - 0.0: Wrong decision
+    - 0.01: Wrong decision (strictly between 0 and 1)
     """
     if not actions_history:
-        return 0.0
+        return 0.01
     
     # Check if agent searched policy
     searched_policy = any(
@@ -49,11 +49,11 @@ def grade_medium(actions_history: List[Dict[str, Any]], ground_truth_decision: s
     )
     
     if correct_decision and searched_policy:
-        return 1.0
+        return 0.99
     elif correct_decision and not searched_policy:
-        return 0.5  # Lucky guess
+        return 0.5  # Lucky guess (already strictly between 0 and 1)
     else:
-        return 0.0
+        return 0.01
 
 
 def grade_hard(
@@ -64,14 +64,14 @@ def grade_hard(
     """
     Hard task: Multi-turn contextual decision.
     
-    Score breakdown (component-based):
+    Score breakdown (component-based, strictly between 0 and 1):
     - identified_missing_doc: 0.3 (RequestInformation was called)
-    - correct_final_decision: 0.7 (ResolveTicket matches ground truth)
+    - correct_final_decision: 0.69 (ResolveTicket matches ground truth)
     
-    Total: 0.0 to 1.0
+    Total: strictly between 0.01 and 0.99
     """
     if not actions_history:
-        return 0.0
+        return 0.01
     
     score = 0.0
     
@@ -90,9 +90,10 @@ def grade_hard(
         final_action.get("action_type") == "ResolveTicket" and
         final_action.get("decision") == ground_truth_decision
     ):
-        score += 0.7  # Full credit for correct decision
+        score += 0.69  # Changed from 0.7 to 0.69 so max total is 0.99, not 1.0
     
-    return score
+    # Clamp to strictly between 0.01 and 0.99
+    return max(0.01, min(0.99, score))
 
 
 def grade_episode(
@@ -111,7 +112,7 @@ def grade_episode(
         requested_document: Whether a document was requested (for hard tasks)
     
     Returns:
-        Dict with score, task_id, and details
+        Dict with score, task_id, and details (score strictly between 0 and 1)
     """
     if task_id == "easy":
         score = grade_easy(actions_history, ground_truth_decision)
@@ -120,10 +121,13 @@ def grade_episode(
     elif task_id == "hard":
         score = grade_hard(actions_history, ground_truth_decision, requested_document)
     else:
-        score = 0.0
+        score = 0.5  # Default middle value for unknown tasks
+    
+    # Final safety clamp to strictly between 0.01 and 0.99
+    score = max(0.01, min(0.99, score))
     
     return {
-        "score": max(0.0, min(1.0, score)),  # Clamp to [0, 1]
+        "score": score,
         "task_id": task_id,
         "num_steps": len(actions_history),
         "details": f"Graded {task_id} task with {len(actions_history)} actions"
