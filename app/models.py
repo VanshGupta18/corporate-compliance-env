@@ -24,6 +24,7 @@ class ComplianceObservation(Observation):
     env_message: str
     step_count: int
     max_steps: int
+    ground_truth_decision: Optional[str] = None  # Included only when episode is done
 
 class ComplianceState(State):
     task_id: Optional[str] = None

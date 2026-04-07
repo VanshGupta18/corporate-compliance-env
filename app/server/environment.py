@@ -141,6 +141,7 @@ class ComplianceEnv(Environment):
             env_message="",
             step_count=self._state.step_count,
             max_steps=self.max_steps,
+            ground_truth_decision=claim.get("ground_truth_decision") if self._state.is_done else None,
         )
         self._state.current_observation = obs
         return obs
