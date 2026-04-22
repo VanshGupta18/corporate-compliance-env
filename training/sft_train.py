@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import torch
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
@@ -15,6 +16,20 @@ def format_example(example: dict) -> dict:
     return {"text": text}
 
 
+def resolve_precision(precision: str) -> tuple[bool, bool]:
+    if precision == "bf16":
+        return True, False
+    if precision == "fp16":
+        return False, True
+    if precision == "fp32":
+        return False, False
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        return True, False
+    if torch.cuda.is_available():
+        return False, True
+    return False, False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="SFT for compliance environment.")
     parser.add_argument("--model-id", default="Qwen/Qwen2.5-3B-Instruct")
@@ -22,6 +37,10 @@ def main() -> None:
     parser.add_argument("--output-dir", default="training/checkpoints/sft")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=2)
+    parser.add_argument("--max-length", type=int, default=512)
+    parser.add_argument("--grad-accum", type=int, default=8)
+    parser.add_argument("--learning-rate", type=float, default=2e-4)
+    parser.add_argument("--precision", choices=["auto", "fp16", "bf16", "fp32"], default="auto")
     args = parser.parse_args()
 
     dataset_path = Path(args.dataset_path)
@@ -35,7 +54,7 @@ def main() -> None:
         encoded = tokenizer(
             batch["text"],
             truncation=True,
-            max_length=1024,
+            max_length=args.max_length,
             padding="max_length",
         )
         encoded["labels"] = encoded["input_ids"].copy()
@@ -43,7 +62,16 @@ def main() -> None:
 
     tokenized = dataset.map(tokenize, batched=True, remove_columns=["text"])
 
-    model = AutoModelForCausalLM.from_pretrained(args.model_id, torch_dtype="auto", device_map="auto")
+    use_bf16, use_fp16 = resolve_precision(args.precision)
+    if use_bf16:
+        model_dtype = torch.bfloat16
+    elif use_fp16:
+        model_dtype = torch.float16
+    else:
+        model_dtype = "auto"
+
+    model = AutoModelForCausalLM.from_pretrained(args.model_id, torch_dtype=model_dtype)
+    model.config.use_cache = False
     lora = LoraConfig(
         task_type="CAUSAL_LM",
         r=16,
@@ -57,20 +85,25 @@ def main() -> None:
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
-        gradient_accumulation_steps=4,
-        learning_rate=2e-4,
-        bf16=True,
+        gradient_accumulation_steps=args.grad_accum,
+        learning_rate=args.learning_rate,
+        bf16=use_bf16,
+        fp16=use_fp16,
+        gradient_checkpointing=True,
         logging_steps=10,
         save_steps=200,
         save_total_limit=2,
         report_to="none",
     )
 
+    precision_name = "bf16" if use_bf16 else "fp16" if use_fp16 else "fp32"
+    print(f"SFT precision={precision_name} max_length={args.max_length}")
+
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=tokenized,
-        tokenizer=tokenizer,
+        processing_class=tokenizer,
     )
     trainer.train()
     trainer.save_model(args.output_dir)

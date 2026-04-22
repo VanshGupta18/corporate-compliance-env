@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 import requests
+import torch
 from datasets import load_dataset
 from transformers import TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
@@ -59,21 +60,40 @@ def environment_reward(completions: List[List[Dict[str, str]]], **kwargs) -> Lis
     return rewards
 
 
+def resolve_precision(precision: str) -> tuple[bool, bool]:
+    if precision == "bf16":
+        return True, False
+    if precision == "fp16":
+        return False, True
+    if precision == "fp32":
+        return False, False
+    if torch.cuda.is_available() and torch.cuda.is_bf16_supported():
+        return True, False
+    if torch.cuda.is_available():
+        return False, True
+    return False, False
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train GRPO policy on compliance environment.")
     parser.add_argument("--model-id", default="unsloth/Qwen2.5-3B-Instruct-bnb-4bit")
     parser.add_argument("--dataset-path", default="training/data/sft_dataset.jsonl")
     parser.add_argument("--output-dir", default="training/checkpoints/grpo")
     parser.add_argument("--api-url", default="http://127.0.0.1:7860")
-    parser.add_argument("--max-seq-length", type=int, default=768)
-    parser.add_argument("--num-generations", type=int, default=4)
+    parser.add_argument("--max-seq-length", type=int, default=512)
+    parser.add_argument("--num-generations", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=5e-6)
     parser.add_argument("--save-steps", type=int, default=100)
     parser.add_argument("--logging-steps", type=int, default=5)
     parser.add_argument("--log-file", default="training/logs/grpo_metrics.jsonl")
+    parser.add_argument("--precision", choices=["auto", "fp16", "bf16", "fp32"], default="auto")
     args = parser.parse_args()
+
+    use_bf16, use_fp16 = resolve_precision(args.precision)
+    precision_name = "bf16" if use_bf16 else "fp16" if use_fp16 else "fp32"
+    print(f"GRPO precision={precision_name} max_seq_length={args.max_seq_length} num_generations={args.num_generations}")
 
     dataset = load_dataset("json", data_files=args.dataset_path, split="train")
 
@@ -92,7 +112,7 @@ def main() -> None:
         r=16,
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
         lora_alpha=32,
-        lora_dropout=0.05,
+        lora_dropout=0.0,
         use_gradient_checkpointing="unsloth",
     )
 
@@ -103,6 +123,8 @@ def main() -> None:
         gradient_accumulation_steps=args.grad_accum,
         num_generations=args.num_generations,
         max_completion_length=128,
+        bf16=use_bf16,
+        fp16=use_fp16,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         report_to="none",
