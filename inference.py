@@ -8,7 +8,7 @@ MANDATORY
     API_BASE_URL   The API endpoint for the LLM (e.g., https://router.huggingface.co/v1)
     MODEL_NAME     The model identifier to use for inference
     HF_TOKEN       Your Hugging Face / API key
-    COMPLIANCE_API The compliance environment API URL (default: http://localhost:8000)
+    COMPLIANCE_API The compliance environment API URL (default: http://localhost:7860)
 """
 
 import os

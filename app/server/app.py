@@ -1,12 +1,36 @@
 from openenv.core.env_server import create_fastapi_app
 from app.server.environment import ComplianceEnv
-from app.models import ComplianceAction, ComplianceObservation
+from app.models import (
+    BaselineResponse,
+    BaselineTaskResult,
+    ComplianceAction,
+    ComplianceObservation,
+    DemoInfoResponse,
+    ErrorResponse,
+    GraderRequest,
+    GraderResponse,
+    HealthResponse,
+    RootResponse,
+    TaskMetadata,
+    TasksResponse,
+)
 from app.graders import grade_episode
 from app.baseline import BaselineAgent
-from fastapi import FastAPI
-import json
+from app.dashboard import build_demo
+from fastapi import HTTPException
 import uvicorn
 from pathlib import Path
+from typing import Dict
+
+import gradio as gr
+
+
+APP_TITLE = "Corporate Compliance OpenEnv API"
+APP_VERSION = "1.0.0"
+APP_DESCRIPTION = (
+    "OpenEnv-compatible reinforcement learning environment for auditing corporate "
+    "expense claims against internal policy."
+)
 
 # Create the main app using OpenEnv
 # This automatically creates /ws, /reset, /step, /state endpoints
@@ -15,29 +39,48 @@ app = create_fastapi_app(
     ComplianceAction,
     ComplianceObservation,
 )
+app.title = APP_TITLE
+app.version = APP_VERSION
+app.description = APP_DESCRIPTION
+app.contact = {"name": "Vansh Gupta"}
+app.openapi_tags = [
+    {"name": "core", "description": "Health and service metadata endpoints."},
+    {"name": "tasks", "description": "Task metadata and schema endpoints."},
+    {"name": "evaluation", "description": "Grading and baseline benchmark endpoints."},
+    {"name": "demo", "description": "Live demo dashboard endpoint."},
+]
 
 
-@app.get("/")
+@app.get("/", response_model=RootResponse, tags=["core"])
 async def root():
     """Root endpoint for platform readiness checks."""
-    return {"status": "ok", "service": "corporate-compliance-env"}
+    return RootResponse(
+        status="ok",
+        service="corporate-compliance-env",
+        docs_url="/docs",
+    )
 
 
 # ============================================================================
 # HEALTH CHECK ENDPOINT
 # ============================================================================
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse, tags=["core"])
 async def health_check():
     """Simple health check endpoint."""
-    return {"status": "ok"}
+    return HealthResponse(status="ok")
 
 # ============================================================================
 # ADD CUSTOM /tasks ENDPOINT to the main app
 # ============================================================================
 
-@app.get("/tasks")
-async def get_tasks():
+@app.get(
+    "/tasks",
+    response_model=TasksResponse,
+    tags=["tasks"],
+    responses={500: {"model": ErrorResponse}},
+)
+async def get_tasks() -> TasksResponse:
     """
     Returns list of available tasks and their metadata.
     """
@@ -49,51 +92,28 @@ async def get_tasks():
             config = yaml.safe_load(f)
         
         tasks_list = config.get("tasks", [])
-        # Convert to dict format with task id as key for compatibility
-        tasks_dict = {task["id"]: task for task in tasks_list}
-        
-        return {
-            "tasks": tasks_dict,
-            "action_schema": config.get("action", {}),
-            "observation_schema": config.get("observation", {})
+        tasks_dict: Dict[str, TaskMetadata] = {
+            task["id"]: TaskMetadata(**task) for task in tasks_list
         }
-    except Exception as e:
-        # Fallback if yaml loading fails
-        return {
-            "tasks": {
-                "easy": {
-                    "id": "easy",
-                    "name": "single_step_classification",
-                    "max_steps": 3,
-                    "expected_steps": 1
-                },
-                "medium": {
-                    "id": "medium", 
-                    "name": "policy_retrieval",
-                    "max_steps": 5,
-                    "expected_steps": 2
-                },
-                "hard": {
-                    "id": "hard",
-                    "name": "multi_turn_contextual_decision", 
-                    "max_steps": 8,
-                    "expected_steps": "3-4"
-                }
-            },
-            "action_schema": {
-                "type": "object",
-                "properties": {
-                    "action_type": {"enum": ["SearchPolicy", "RequestInformation", "ResolveTicket"]}
-                }
-            }
-        }
+        return TasksResponse(
+            tasks=tasks_dict,
+            action_schema=config.get("action", {}),
+            observation_schema=config.get("observation", {}),
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to load tasks metadata: {exc}") from exc
 
 # ============================================================================
 # GRADER ENDPOINT — Score completed episodes
 # ============================================================================
 
-@app.post("/grader")
-async def grade_episode_endpoint(request: dict):
+@app.post(
+    "/grader",
+    response_model=GraderResponse,
+    tags=["evaluation"],
+    responses={400: {"model": ErrorResponse}},
+)
+async def grade_episode_endpoint(request: GraderRequest) -> GraderResponse:
     """
     Score a completed episode based on task difficulty.
     
@@ -104,59 +124,70 @@ async def grade_episode_endpoint(request: dict):
         "ground_truth_decision": "Approve|Reject|Escalate"
     }
     """
-    task_id = request.get("task_id", "easy")
-    actions_history = request.get("actions_history", [])
-    ground_truth_decision = request.get("ground_truth_decision")
-    
-    if not ground_truth_decision:
-        return {"error": "ground_truth_decision is required"}
-    
-    score = grade_episode(task_id, actions_history, ground_truth_decision)
-    return {"task_id": task_id, "score": score}
+    score = grade_episode(
+        request.task_id,
+        request.actions_history,
+        request.ground_truth_decision.value,
+    )
+    return GraderResponse(task_id=request.task_id, score=score)
 
 # ============================================================================
 # BASELINE ENDPOINT — Run baseline agent on all tasks
 # ============================================================================
 
-@app.post("/baseline")
-async def run_baseline():
+@app.post(
+    "/baseline",
+    response_model=BaselineResponse,
+    tags=["evaluation"],
+    responses={500: {"model": ErrorResponse}},
+)
+async def run_baseline() -> BaselineResponse:
     """
     Run baseline agent on all 3 task difficulties and return scores.
     Returns scores for easy, medium, and hard tasks.
     """
-    baseline = BaselineAgent(api_url="http://localhost:7860")
+    baseline = BaselineAgent(api_url="http://127.0.0.1:7860")
+    env = ComplianceEnv()
     results = {}
     
     try:
         for task_id in ["easy", "medium", "hard"]:
             try:
-                obs = baseline.reset(task_id=task_id)
+                obs = env.reset(task_id=task_id)
                 done = False
                 steps = 0
-                max_steps = 10
-                
+                max_steps = env.task_max_steps.get(task_id, 8) + 2
                 while not done and steps < max_steps:
-                    action = baseline.decide_action(obs)
-                    obs = baseline.step(action)
-                    done = obs.get("done", False)
+                    action_dict = baseline.decide_action(obs.model_dump())
+                    action = ComplianceAction(**action_dict)
+                    obs = env.step(action)
+                    done = bool(obs.done)
                     steps += 1
-                
-                state = baseline.get_state()
-                score = state.get("cumulative_reward", 0.0)
-                results[task_id] = {
-                    "score": score,
-                    "steps": steps,
-                    "done": done
-                }
-            except Exception as e:
-                results[task_id] = {"error": str(e)}
-    except Exception as e:
-        return {"error": str(e)}
-    
-    return {
-        "baseline_results": results,
-        "average_score": sum([r.get("score", 0) for r in results.values()]) / 3
-    }
+                score = float(env.state.cumulative_reward)
+                results[task_id] = BaselineTaskResult(score=score, steps=steps, done=done)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed baseline run for task '{task_id}': {exc}",
+                ) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    average_score = sum(result.score for result in results.values()) / len(results)
+    return BaselineResponse(baseline_results=results, average_score=average_score)
+demo = build_demo()
+app = gr.mount_gradio_app(app, demo, path="/demo")
+
+
+@app.get("/demo/info", response_model=DemoInfoResponse, tags=["demo"])
+async def demo_info() -> DemoInfoResponse:
+    return DemoInfoResponse(
+        message="Gradio dashboard mounted successfully.",
+        path="/demo",
+        ui_library="gradio",
+    )
 
 
 def main():

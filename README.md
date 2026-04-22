@@ -101,19 +101,19 @@ The agent can also:
 
 ### Use the Live Space
 
-Visit the running instance: **https://huggingface.co/spaces/mcqueemmater/env-corporate**
+Visit the running instance: **https://huggingface.co/spaces/mcqueenmater/env-corporate**
 
 ### Run Locally with Docker
 
 ```bash
 # Clone and build
-git clone https://huggingface.co/spaces/mcqueemmater/env-corporate
+git clone https://huggingface.co/spaces/mcqueenmater/env-corporate
 cd corporate-compliance-env
 docker build -t compliance-env .
-docker run -p 8000:8000 compliance-env
+docker run -p 7860:7860 compliance-env
 
 # Validate against OpenEnv spec
-openenv validate --url http://localhost:8000 --verbose
+openenv validate --url http://localhost:7860 --verbose
 ```
 
 ### Run the LLM Inference Agent
@@ -140,6 +140,7 @@ python inference.py
 | `/grader` | POST | Get final score for completed episode |
 | `/baseline` | POST | Run baseline agent on all 3 tasks |
 | `/docs` | GET | Swagger interactive API documentation |
+| `/demo` | GET | Gradio live demo dashboard |
 
 ---
 
@@ -527,6 +528,10 @@ pip install -r requirements.txt
 uvicorn app.server.app:app --host 0.0.0.0 --port 7860
 ```
 
+Open:
+- API docs: `http://localhost:7860/docs`
+- Live dashboard: `http://localhost:7860/demo`
+
 ### 3. Validate Against OpenEnv Spec
 
 ```bash
@@ -552,6 +557,7 @@ Average Score:    0.577
 
 ```bash
 pytest tests/test_graders.py -v
+pytest tests/test_api.py -v
 ```
 
 ### 6. Run via Docker
@@ -629,4 +635,10 @@ can handle ~70% of routine compliance decisions autonomously.
 ---
 
 *Built for the Meta Hackathon 2026.*
+
+---
+
+## 🧪 Training Pipeline (SFT + GRPO)
+
+For end-to-end model training and adapter publishing instructions, see [`TRAINING.md`](TRAINING.md).
 
