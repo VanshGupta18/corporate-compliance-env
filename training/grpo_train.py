@@ -5,8 +5,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import requests
 import torch
@@ -32,27 +33,98 @@ class JsonlMetricsCallback(TrainerCallback):
             handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
 
 
+def completion_to_text(completion: Any) -> str:
+    if isinstance(completion, str):
+        return completion
+
+    if isinstance(completion, dict):
+        content = completion.get("content", completion.get("text", ""))
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: List[str] = []
+            for part in content:
+                if isinstance(part, str):
+                    parts.append(part)
+                elif isinstance(part, dict):
+                    if isinstance(part.get("text"), str):
+                        parts.append(part["text"])
+                    elif isinstance(part.get("content"), str):
+                        parts.append(part["content"])
+            if parts:
+                return "".join(parts)
+        return json.dumps(completion, ensure_ascii=True)
+
+    if isinstance(completion, (list, tuple)):
+        if not completion:
+            return ""
+        return completion_to_text(completion[0])
+
+    return str(completion)
+
+
+def parse_json_payload(text: str) -> Optional[Dict[str, Any]]:
+    candidate = text.strip()
+    if not candidate:
+        return None
+
+    try:
+        payload = json.loads(candidate)
+        return payload if isinstance(payload, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    json_match = re.search(r"\{.*\}", candidate, re.DOTALL)
+    if not json_match:
+        return None
+
+    try:
+        payload = json.loads(json_match.group(0))
+        return payload if isinstance(payload, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
 def action_json_reward(completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
     rewards: List[float] = []
     for completion in completions:
-        content = completion[0]["content"]
-        try:
-            payload = json.loads(content)
-            valid = payload.get("action_type") in {"SearchPolicy", "RequestInformation", "ResolveTicket"}
-            rewards.append(1.0 if valid else 0.0)
-        except Exception:
+        content = completion_to_text(completion)
+        payload = parse_json_payload(content)
+        if not payload:
             rewards.append(0.0)
+            continue
+
+        valid = payload.get("action_type") in {"SearchPolicy", "RequestInformation", "ResolveTicket"}
+        rewards.append(1.0 if valid else 0.0)
     return rewards
 
 
 def environment_reward(completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
     api_url = kwargs.get("api_url") or os.getenv("API_URL") or "http://127.0.0.1:7860"
-    task_ids = kwargs.get("task_id", [])
+    raw_task_ids = kwargs.get("task_id", [])
+    if isinstance(raw_task_ids, list):
+        task_ids = raw_task_ids
+    elif isinstance(raw_task_ids, tuple):
+        task_ids = list(raw_task_ids)
+    elif raw_task_ids is None:
+        task_ids = []
+    else:
+        task_ids = [str(raw_task_ids)]
+
+    if not task_ids:
+        task_ids = ["easy"] * len(completions)
+    elif len(task_ids) < len(completions):
+        task_ids.extend([task_ids[-1]] * (len(completions) - len(task_ids)))
+
     rewards: List[float] = []
     for completion, task_id in zip(completions, task_ids):
-        content = completion[0]["content"]
+        content = completion_to_text(completion)
+        payload = parse_json_payload(content)
+        if not payload:
+            rewards.append(-0.5)
+            continue
+
         try:
-            payload = json.loads(content)
             requests.post(f"{api_url}/reset", params={"task_id": task_id}, timeout=30).raise_for_status()
             result = requests.post(f"{api_url}/step", json={"action": payload}, timeout=30)
             result.raise_for_status()

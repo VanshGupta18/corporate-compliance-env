@@ -17,7 +17,8 @@ from app.models import (
 from app.graders import grade_episode
 from app.baseline import BaselineAgent
 from app.dashboard import build_demo
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
+from fastapi.responses import RedirectResponse
 import uvicorn
 from pathlib import Path
 from typing import Dict
@@ -52,8 +53,12 @@ app.openapi_tags = [
 
 
 @app.get("/", response_model=RootResponse, tags=["core"])
-async def root():
-    """Root endpoint for platform readiness checks."""
+async def root(request: Request):
+    """Root endpoint for platform readiness checks and docs discovery."""
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept:
+        return RedirectResponse(url="/docs", status_code=307)
+
     return RootResponse(
         status="ok",
         service="corporate-compliance-env",
