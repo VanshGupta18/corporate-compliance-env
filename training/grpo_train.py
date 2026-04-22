@@ -12,10 +12,9 @@ from typing import Any, Dict, List, Optional
 import requests
 import torch
 from datasets import load_dataset
-import unsloth  # noqa: F401
-from unsloth import FastLanguageModel
 from transformers import TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
+from unsloth import FastLanguageModel
 
 
 class JsonlMetricsCallback(TrainerCallback):
