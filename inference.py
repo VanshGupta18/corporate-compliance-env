@@ -24,7 +24,7 @@ from app.graders import grade_episode
 
 # ===== Environment Configuration =====
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_KEY = os.getenv("HF_TOKEN")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
 COMPLIANCE_API = os.getenv("COMPLIANCE_API", "https://mcqueenmater-env-corporate.hf.space")
 

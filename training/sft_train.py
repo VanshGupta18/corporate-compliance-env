@@ -81,6 +81,15 @@ def main() -> None:
     )
     model = get_peft_model(model, lora)
 
+    # With gradient checkpointing + LoRA on frozen backbones, ensure checkpointed
+    # activations keep a grad path to trainable adapter weights.
+    if hasattr(model, "enable_input_require_grads"):
+        model.enable_input_require_grads()
+
+    trainable_params = sum(param.numel() for param in model.parameters() if param.requires_grad)
+    if trainable_params == 0:
+        raise RuntimeError("No trainable LoRA parameters found. Check target_modules/model compatibility.")
+
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
@@ -90,6 +99,7 @@ def main() -> None:
         bf16=use_bf16,
         fp16=use_fp16,
         gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         logging_steps=10,
         save_steps=200,
         save_total_limit=2,
@@ -97,7 +107,7 @@ def main() -> None:
     )
 
     precision_name = "bf16" if use_bf16 else "fp16" if use_fp16 else "fp32"
-    print(f"SFT precision={precision_name} max_length={args.max_length}")
+    print(f"SFT precision={precision_name} max_length={args.max_length} trainable_params={trainable_params}")
 
     trainer = Trainer(
         model=model,
