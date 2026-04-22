@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, List
 
 import requests
 import torch
 from datasets import load_dataset
+import unsloth  # noqa: F401
+from unsloth import FastLanguageModel
 from transformers import TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
-from unsloth import FastLanguageModel
 
 
 class JsonlMetricsCallback(TrainerCallback):
@@ -44,7 +46,7 @@ def action_json_reward(completions: List[List[Dict[str, str]]], **kwargs) -> Lis
 
 
 def environment_reward(completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
-    api_url = kwargs.get("api_url", "http://127.0.0.1:7860")
+    api_url = kwargs.get("api_url") or os.getenv("API_URL") or "http://127.0.0.1:7860"
     task_ids = kwargs.get("task_id", [])
     rewards: List[float] = []
     for completion, task_id in zip(completions, task_ids):
@@ -136,7 +138,6 @@ def main() -> None:
         reward_funcs=[action_json_reward, environment_reward],
         args=config,
         train_dataset=dataset,
-        reward_kwargs={"api_url": args.api_url},
         callbacks=[JsonlMetricsCallback(args.log_file)],
     )
     trainer.train()
