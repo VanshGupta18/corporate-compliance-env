@@ -84,11 +84,12 @@ def test_hard_document_request_clears_missing(env):
             query=claim.get("rule_keyword", "meal"),
         )
     )
-    req = claim.get("required_document") or "manager_approval"
+    req = claim.get("missing_document") or claim.get("required_document")
+    assert req, "selected hard claim must declare a required document"
     obs = env.step(
         ComplianceAction(
             action_type=ActionType.REQUEST_INFORMATION,
-            message=f"Please provide {req}",
+            message=f"Please provide {req.replace('_', ' ')}",
         )
     )
     msg = obs.env_message.lower()

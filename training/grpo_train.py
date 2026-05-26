@@ -77,6 +77,7 @@ def completion_to_text(completion: Any) -> str:
 
 
 def action_json_reward(completions, **kwargs) -> List[float]:
+    """Small format reward; task quality comes from grader_reward."""
     rewards = []
     for completion in completions:
         payload = parse_json_payload(completion_to_text(completion))
@@ -85,7 +86,7 @@ def action_json_reward(completions, **kwargs) -> List[float]:
             "RequestInformation",
             "ResolveTicket",
         }
-        rewards.append(1.0 if valid else 0.0)
+        rewards.append(0.10 if valid else -0.10)
     return rewards
 
 

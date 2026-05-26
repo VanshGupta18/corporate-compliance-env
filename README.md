@@ -128,7 +128,9 @@ python inference.py             # writes inference_results.json (gitignored)
 
 ### Train on Google Colab (Unsloth SFT + GRPO)
 
-See **[`TRAINING.md`](TRAINING.md)** for the Colab-first pipeline: data prep, SFT warm-start, curriculum GRPO stages, and local eval (no WebSocket server required).
+**Notebook:** [`notebooks/Colab_T4_Training.ipynb`](notebooks/Colab_T4_Training.ipynb) — in Colab use *File → Open notebook → GitHub* and pick your fork, or upload the notebook. Set **Runtime → T4 GPU**, then set `GITHUB_USER` in the first code cell.
+
+See **[`TRAINING.md`](TRAINING.md)** for the same pipeline as copy-paste cells.
 
 ### Docker
 
@@ -296,8 +298,8 @@ This provides a rich training signal over the full trajectory.
 | Event | Reward | Notes |
 |-------|--------|-------|
 | Correct `ResolveTicket` | `+1.0` | Full credit for correct final decision |
-| Relevant `SearchPolicy` | `+0.1` | Rule was genuinely unknown at that point |
-| Correct `RequestInformation` | `+0.1` | Document was actually missing |
+| Relevant `SearchPolicy` | `+0.15` | Rule was genuinely unknown at that point |
+| Correct `RequestInformation` | `+0.15` | Document was actually missing |
 | Irrelevant `SearchPolicy` | `-0.05` | Rule was already visible in observation |
 | Asking for info already in ticket | `-0.2` | Agent ignored visible context |
 | Wrong `ResolveTicket` decision | `-1.0` | Fatal — episode ends immediately |
@@ -326,9 +328,9 @@ immediately call `ResolveTicket`.
 - **Expected Steps:** 1
 - **Grader logic:**
 
-```
-score = 1.0 if decision == ground_truth_decision else 0.0
-```
+Easy scoring is component-based: valid `ResolveTicket`, correct decision,
+valid reason, and no unnecessary tool calls. A wrong decision stays below
+the success threshold even if the JSON and reason are valid.
 
 - **Example:**
   > Ticket: *"Meal expense ₹800, no receipt attached."*
@@ -347,14 +349,9 @@ then resolve.
 - **Expected Steps:** 2
 - **Grader logic:**
 
-```
-searched_policy = any action_type == "SearchPolicy" in episode
-correct_decision = final_decision == ground_truth_decision
-
-if correct_decision and searched_policy:     score = 1.0
-elif correct_decision and not searched_policy: score = 0.5  # lucky guess
-else:                                          score = 0.0
-```
+Medium scoring requires a useful `SearchPolicy` before final decision credit.
+A lucky correct `ResolveTicket` without useful search is capped below the
+success threshold.
 
 - **Example:**
   > Ticket: *"Business class flight Mumbai→Delhi, ₹45,000."*
@@ -375,14 +372,9 @@ as a risk factor.
 - **Expected Steps:** 3–4
 - **Grader logic (multi-component):**
 
-```
-component_scores = {
-  "identified_missing_doc":  0.3,  # RequestInformation was correct
-  "correct_info_request":    0.3,  # message asked for the right doc
-  "correct_final_decision":  0.4   # ResolveTicket matches ground truth
-}
-score = sum of earned components  # 0.0 to 1.0
-```
+Hard scoring requires the intended workflow: useful policy search, correct
+document request, then a correct final decision. Correct guesses that skip
+search or document request are capped below the success threshold.
 
 - **Example:**
   > Ticket: *"International travel ₹1,20,000 — no VP approval note."*

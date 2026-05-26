@@ -77,6 +77,7 @@ class GraderRequest(BaseModel):
     task_id: Literal["easy", "medium", "hard"] = "easy"
     actions_history: List[Dict[str, Any]] = Field(default_factory=list)
     ground_truth_decision: TicketDecision
+    claim: Optional[Dict[str, Any]] = None
 
 
 class GraderResponse(BaseModel):

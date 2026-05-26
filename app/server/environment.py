@@ -2,8 +2,8 @@ import json
 import os
 import random
 import uuid
+from copy import deepcopy
 from pathlib import Path
-from typing import Dict
 
 from openenv.core.env_server import Environment
 
@@ -29,9 +29,9 @@ class ComplianceEnv(Environment):
         # Per-episode hidden state
         self._policy_revealed = False
         self._useful_search = False
+        self._ever_useful_search = False
         self._document_received = False
         self._env_message = ""
-        self._claims_by_id: Dict[str, dict] = {}
 
     def _load_claims(self):
         """Load all claims and retain split labels for deterministic evaluation."""
@@ -59,7 +59,7 @@ class ComplianceEnv(Environment):
 
         claim_id = kwargs.get("claim_id")
         if claim_id and claim_id in self._claims_by_id:
-            self._current_claim = dict(self._claims_by_id[claim_id])
+            self._current_claim = deepcopy(self._claims_by_id[claim_id])
         else:
             filtered = [
                 c
@@ -70,14 +70,15 @@ class ComplianceEnv(Environment):
                 filtered = [c for c in self.claims if c.get("task_difficulty") == task_id]
             if seed is not None:
                 rng = random.Random(seed)
-                self._current_claim = dict(rng.choice(filtered if filtered else self.claims))
+                self._current_claim = deepcopy(rng.choice(filtered if filtered else self.claims))
             else:
-                self._current_claim = dict(
+                self._current_claim = deepcopy(
                     random.choice(filtered if filtered else self.claims)
                 )
 
         self._policy_revealed = False
         self._useful_search = False
+        self._ever_useful_search = False
         self._document_received = False
         self._env_message = ""
 
@@ -104,14 +105,20 @@ class ComplianceEnv(Environment):
         if self._state.step_count >= self.max_steps and not self._state.is_done:
             self._state.is_done = True
             self._env_message = "Maximum steps reached. Episode terminated."
-            return reward - 0.5, True
+            return -0.5, True
         return reward, False
 
+    @staticmethod
+    def _clamp_reward(reward: float) -> float:
+        return max(-1.0, min(1.0, reward))
+
     def _finalize_step(self, reward: float, action: ComplianceAction) -> ComplianceObservation:
+        reward = self._clamp_reward(reward)
         self._state.rewards_history.append(reward)
         self._state.actions_history.append(action.model_dump())
         self._state.cumulative_reward += reward
         reward, forced_done = self._check_max_steps(reward)
+        reward = self._clamp_reward(reward)
         if forced_done:
             self._state.rewards_history[-1] = reward
             self._state.cumulative_reward = sum(self._state.rewards_history)
@@ -139,6 +146,7 @@ class ComplianceEnv(Environment):
                 )
                 self._policy_revealed = True
                 self._useful_search = relevant
+                self._ever_useful_search = self._ever_useful_search or relevant
                 self._env_message = snippet
                 reward = 0.15 if relevant else -0.05
 
@@ -185,7 +193,7 @@ class ComplianceEnv(Environment):
 
             if task_id == "medium" and not self._has_searched_policy():
                 reward -= 0.25
-            elif task_id == "medium" and not self._useful_search:
+            elif task_id == "medium" and not self._ever_useful_search:
                 reward -= 0.15
 
             if task_id == "hard":

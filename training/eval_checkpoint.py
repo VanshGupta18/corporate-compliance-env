@@ -68,6 +68,7 @@ class WebSocketEnvRunner:
         self.client = self._client_ctx.__enter__()
         self.split = split
         self._claim: Dict[str, Any] = {}
+        self._claims_by_id = {c["id"]: c for c in load_split_claims(split)}
 
     def reset(self, task_id: str, claim_id: str | None = None) -> tuple[Dict[str, Any], bool]:
         kwargs: Dict[str, Any] = {"task_id": task_id, "split": self.split}
@@ -75,7 +76,7 @@ class WebSocketEnvRunner:
             kwargs["claim_id"] = claim_id
         result = self.client.reset(**kwargs)
         obs = result.observation.model_dump()
-        self._claim = {}
+        self._claim = dict(self._claims_by_id.get(claim_id, {})) if claim_id else {}
         return obs, result.done
 
     def step(self, action: Dict[str, Any]) -> tuple[Dict[str, Any], float, bool]:

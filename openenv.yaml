@@ -116,16 +116,16 @@ observation:
 reward:
   min: -1.0
   max: 1.0
-  distribution: sparse  # Mostly 0, non-zero on key events
+  distribution: dense  # Step rewards plus terminal decision reward
   events:
     - name: correct_resolve
       value: 1.0
       description: Correct ResolveTicket decision
     - name: relevant_search
-      value: 0.1
+      value: 0.15
       description: Relevant SearchPolicy query
     - name: correct_request
-      value: 0.1
+      value: 0.15
       description: Correct RequestInformation
     - name: wrong_resolve
       value: -1.0

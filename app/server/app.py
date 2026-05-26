@@ -126,13 +126,15 @@ async def grade_episode_endpoint(request: GraderRequest) -> GraderResponse:
     {
         "task_id": "easy|medium|hard",
         "actions_history": [...],
-        "ground_truth_decision": "Approve|Reject|Escalate"
+        "ground_truth_decision": "Approve|Reject|Escalate",
+        "claim": {"rule_keyword": "...", "missing_document": "..."}  # needed for medium/hard
     }
     """
     score = grade_episode(
         request.task_id,
         request.actions_history,
         request.ground_truth_decision.value,
+        claim=request.claim,
     )
     return GraderResponse(task_id=request.task_id, score=score)
 

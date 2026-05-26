@@ -50,6 +50,28 @@ def test_openapi_contains_custom_paths():
     assert "/demo/info" in paths
 
 
+def test_grader_accepts_claim_metadata():
+    response = client.post(
+        "/grader",
+        json={
+            "task_id": "medium",
+            "actions_history": [
+                {"action_type": "SearchPolicy", "query": "daytime cab manager"},
+                {
+                    "action_type": "ResolveTicket",
+                    "decision": "Reject",
+                    "reason": "Daytime cab requires manager note.",
+                },
+            ],
+            "ground_truth_decision": "Reject",
+            "claim": {"rule_keyword": "daytime cab"},
+        },
+    )
+    assert response.status_code == 200
+    score = response.json()["score"]
+    assert score["components"]["useful_search"] > 0
+
+
 def test_websocket_multi_step_episode():
     """WebSocket session preserves state across steps (HTTP does not)."""
     with client.websocket_connect("/ws") as ws:

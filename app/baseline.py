@@ -15,6 +15,19 @@ from app.graders import grade_episode
 from app.models import ComplianceAction, ActionType, TicketDecision
 
 
+def _infer_required_document(observation: Dict[str, Any]) -> str:
+    rule_keyword = (observation.get("rule_keyword") or "").lower()
+    description = (observation.get("description") or "").lower()
+    text = f"{rule_keyword} {description}"
+    if "international" in text or "vp" in text:
+        return "vp_approval"
+    if "gst" in text or (observation.get("amount", 0) or 0) > 5000:
+        return "gst_invoice"
+    if "wfh" in text or "internet" in text or "electricity" in text:
+        return "utility_bill"
+    return "manager_approval"
+
+
 def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
     """Map legacy Escalate action_type to ResolveTicket."""
     if action.get("action_type") == "Escalate":
@@ -92,7 +105,7 @@ class BaselineAgent:
         if missing_doc == "required":
             return {
                 "action_type": "RequestInformation",
-                "message": "Please provide manager_approval",
+                "message": f"Please provide {_infer_required_document(observation)}",
             }
 
         if "meal" in description or "lunch" in description or "dinner" in description:

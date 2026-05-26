@@ -28,6 +28,18 @@ def test_easy_penalize_unnecessary_search():
     assert r["components"]["no_unnecessary_tools"] == 0.0
 
 
+def test_easy_wrong_decision_stays_below_success_threshold():
+    actions = [
+        {
+            "action_type": "ResolveTicket",
+            "decision": "Approve",
+            "reason": "Looks valid from visible fields.",
+        }
+    ]
+    r = grade_easy(actions, "Reject")
+    assert r["score"] < 0.5
+
+
 def test_medium_requires_useful_search():
     claim = {"rule_keyword": "daytime cab"}
     actions = [
@@ -54,6 +66,20 @@ def test_medium_requires_useful_search():
     assert r2["components"]["useful_search"] > 0
 
 
+def test_medium_correct_guess_without_search_is_capped():
+    claim = {"rule_keyword": "daytime cab"}
+    actions = [
+        {
+            "action_type": "ResolveTicket",
+            "decision": "Reject",
+            "reason": "Missing manager note for daytime cab.",
+        }
+    ]
+    r = grade_medium(actions, "Reject", claim)
+    assert r["score"] < 0.5
+    assert r["components"]["correct_decision"] == 0.0
+
+
 def test_hard_correct_document_request():
     claim = {
         "rule_keyword": "large meal",
@@ -75,6 +101,24 @@ def test_hard_correct_document_request():
     r = grade_hard(actions, "Approve", claim)
     assert r["components"]["correct_document_request"] > 0
     assert r["score"] >= 0.7
+
+
+def test_hard_correct_guess_without_workflow_is_capped():
+    claim = {
+        "rule_keyword": "large meal",
+        "required_document": "manager_approval",
+        "max_steps": 8,
+    }
+    actions = [
+        {
+            "action_type": "ResolveTicket",
+            "decision": "Approve",
+            "reason": "Assume the claim complies.",
+        }
+    ]
+    r = grade_hard(actions, "Approve", claim)
+    assert r["score"] < 0.5
+    assert r["components"]["correct_decision"] == 0.0
 
 
 def test_grade_episode_dispatch():

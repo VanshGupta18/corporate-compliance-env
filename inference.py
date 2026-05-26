@@ -46,12 +46,9 @@ SYSTEM_PROMPT = textwrap.dedent(
     
     Valid decisions: "Approve", "Reject", "Escalate"
     
-    KEY POLICY RULES QUICK REFERENCE:
-    - Amounts < ₹500: No receipt required
-    - Amounts ≥ ₹500: Receipt REQUIRED
-    - Alcohol, gifts, shopping: ALWAYS reject
-    - Missing documents: Request information
-    - VP+ (L7-L9): Escalate for review
+    Do not assume hidden policy details. Use SearchPolicy when the relevant rule is
+    hidden or unclear. Use RequestInformation when the ticket indicates a required
+    document is missing.
     
     Respond with ONLY a valid action in JSON format:
     {"action_type": "...", "query": "...", "message": "...", "decision": "...", "reason": "..."}
@@ -61,7 +58,8 @@ SYSTEM_PROMPT = textwrap.dedent(
 
 def build_user_prompt(observation: Dict, task_id: str, step: int) -> str:
     """Build the user prompt from the current observation."""
-    steps_remaining = (MAX_STEPS_PER_TASK - step + 1)
+    max_steps = int(observation.get("max_steps") or MAX_STEPS_PER_TASK)
+    steps_remaining = (max_steps - step + 1)
     
     # Add urgency message if running low on steps
     urgency = ""
@@ -70,7 +68,7 @@ def build_user_prompt(observation: Dict, task_id: str, step: int) -> str:
     
     prompt = textwrap.dedent(
         f"""
-        Task: {task_id} | Step: {step}/{MAX_STEPS_PER_TASK}
+        Task: {task_id} | Step: {step}/{max_steps}
         
         Ticket ID: {observation.get('ticket_id')}
         Employee: {observation.get('employee_name')} ({observation.get('employee_role')})
@@ -100,6 +98,7 @@ def rule_based_fallback(observation: Dict) -> Dict:
     level = observation.get("employee_level", "L1")
     has_receipt = observation.get("has_receipt", False)
     missing_doc = observation.get("missing_document")
+    rule_keyword = (observation.get("rule_keyword") or "").lower()
     description = observation.get("description", "").lower()
     
     # Check for alcohol or personal items
@@ -120,9 +119,19 @@ def rule_based_fallback(observation: Dict) -> Dict:
     
     # If missing documents, request them
     if missing_doc:
+        if missing_doc == "required":
+            text = f"{rule_keyword} {description}"
+            if "international" in text or "vp" in text:
+                missing_doc = "vp_approval"
+            elif "gst" in text or amount > 5000:
+                missing_doc = "gst_invoice"
+            elif "wfh" in text or "internet" in text or "electricity" in text:
+                missing_doc = "utility_bill"
+            else:
+                missing_doc = "manager_approval"
         return {
             "action_type": "RequestInformation",
-            "message": f"Please provide the missing: {missing_doc}",
+            "message": f"Please provide {missing_doc}",
         }
     
     # Meals and travel rules
@@ -189,7 +198,12 @@ def parse_model_response(response_text: str) -> Optional[Dict]:
     return None
 
 
-def run_episode(client: Any, task_id: str, claim_id: str | None = None) -> Dict:
+def run_episode(
+    client: Any,
+    task_id: str,
+    claim_id: str | None = None,
+    claim: Optional[Dict[str, Any]] = None,
+) -> Dict:
     """Run a single episode on the given task (difficulty), optionally pinned to a claim."""
     print(f"[START] task={task_id.upper()} env=corporate-compliance-env model={MODEL_NAME}", flush=True)
 
@@ -208,7 +222,8 @@ def run_episode(client: Any, task_id: str, claim_id: str | None = None) -> Dict:
         "done": False,
     }
 
-    for step in range(1, MAX_STEPS_PER_TASK + 1):
+    max_steps = int(getattr(observation, "max_steps", MAX_STEPS_PER_TASK) or MAX_STEPS_PER_TASK)
+    for step in range(1, max_steps + 1):
         # Build prompt for LLM
         obs_dict = observation.model_dump() if hasattr(observation, 'model_dump') else observation.__dict__
         user_prompt = build_user_prompt(obs_dict, task_id, step)
@@ -286,41 +301,21 @@ def run_episode(client: Any, task_id: str, claim_id: str | None = None) -> Dict:
 
     episode_data["final_reward"] = episode_data["total_reward"]
     
-    # Build actions history for grading (needed for ground_truth fallback logic)
     actions_history = episode_data.get("steps", [])
-    
-    # Get ground truth decision from final observation for grading
-    ground_truth_decision = None
-    if observation:
-        # Try to get as Pydantic model attribute first
-        if hasattr(observation, 'ground_truth_decision'):
-            ground_truth_decision = observation.ground_truth_decision
-        # Then try as dict
-        elif isinstance(observation, dict) and 'ground_truth_decision' in observation:
-            ground_truth_decision = observation['ground_truth_decision']
-    
-    # Fallback: if no ground_truth provided, use the agent's final decision
-    # (environment validated it was correct with reward >= 0)
-    if not ground_truth_decision and actions_history:
-        final_action = actions_history[-1]
-        if final_action.get("action_type") == "ResolveTicket" and episode_data.get("final_reward", 0) >= 0:
-            # Agent's decision was validated as correct by environment
-            ground_truth_decision = final_action.get("decision", "Approve")
-    
-    # Last resort fallback
-    if not ground_truth_decision:
-        ground_truth_decision = "Approve"
-    
-    # Use grader to calculate task score (strictly between 0 and 1)
+    if not claim or not claim.get("ground_truth_decision"):
+        raise ValueError("run_episode requires claim metadata with ground_truth_decision for grading.")
+
     grader_result = grade_episode(
         task_id=task_id,
         actions_history=actions_history,
-        ground_truth_decision=ground_truth_decision
+        ground_truth_decision=claim["ground_truth_decision"],
+        claim=claim,
     )
-    normalized_score = grader_result["score"]
+    normalized_score = float(grader_result["score"])
+    correct_decision = bool(grader_result["components"].get("correct_decision", 0.0))
     
     # Calculate success and format rewards
-    success = episode_data["done"] and normalized_score > 0.5
+    success = episode_data["done"] and correct_decision
     rewards_str = ",".join(f"{step['reward']:.2f}" for step in episode_data["steps"])
     print(f"[END] success={str(success).lower()} steps={len(episode_data['steps'])} score={normalized_score:.3f} rewards={rewards_str}", flush=True)
     episode_data["grader_score"] = normalized_score
@@ -358,7 +353,7 @@ def main() -> None:
                 difficulty = claim["task_difficulty"]
 
                 print(f"Running inference for claim {claim_id} ({difficulty})...")
-                episode_data = run_episode(client, difficulty, claim_id=claim_id)
+                episode_data = run_episode(client, difficulty, claim_id=claim_id, claim=claim)
 
                 grader_result = grade_episode(
                     task_id=difficulty,

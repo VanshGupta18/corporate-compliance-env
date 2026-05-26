@@ -1,5 +1,7 @@
 # Colab Training Runbook (Unsloth SFT + GRPO)
 
+**Notebook:** open [`notebooks/Colab_T4_Training.ipynb`](notebooks/Colab_T4_Training.ipynb) in Colab (Runtime → T4 GPU) for a cell-by-cell run of this guide.
+
 This guide targets **Google Colab** with a T4 GPU. You do **not** need a local GPU or a running WebSocket server for training or evaluation — rollouts use the in-process `ComplianceEnv`.
 
 Default model: `unsloth/Qwen2.5-3B-Instruct-bnb-4bit`  
@@ -12,7 +14,8 @@ Default T4 settings: `max_seq_length=512`, `batch_size=1`, `grad_accum=8`, `num_
 !git clone https://github.com/YOUR_USER/meta-openenv.git
 %cd meta-openenv
 
-# Cell 2 — install pinned training deps
+# Cell 2 — env runtime deps + pinned training deps (openenv-core is required for ComplianceEnv)
+!pip install -q -r requirements.txt
 !pip install -q -r training/requirements-training.txt
 
 # Cell 3 — verify wiring (no GPU model load)
