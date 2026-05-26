@@ -5,10 +5,15 @@ Log per-difficulty validation metrics for curriculum learning graphs.
 from __future__ import annotations
 
 import json
+import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
 from app.curriculum_targets import PRE_RL_TARGETS, POST_RL_TARGETS, score_in_band
 from app.graders import grade_episode
