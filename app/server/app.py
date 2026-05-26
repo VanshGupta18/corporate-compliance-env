@@ -151,10 +151,10 @@ async def run_baseline() -> BaselineResponse:
     Run baseline agent on all 3 task difficulties and return scores.
     Returns scores for easy, medium, and hard tasks.
     """
-    baseline = BaselineAgent(api_url="http://127.0.0.1:7860")
+    baseline = BaselineAgent()
     env = ComplianceEnv()
     results = {}
-    
+
     try:
         for task_id in ["easy", "medium", "hard"]:
             try:
@@ -164,11 +164,23 @@ async def run_baseline() -> BaselineResponse:
                 max_steps = env.task_max_steps.get(task_id, 8) + 2
                 while not done and steps < max_steps:
                     action_dict = baseline.decide_action(obs.model_dump())
+                    if action_dict.get("action_type") == "Escalate":
+                        action_dict = {
+                            "action_type": "ResolveTicket",
+                            "decision": "Escalate",
+                            "reason": action_dict.get("reason", "Rule 14"),
+                        }
                     action = ComplianceAction(**action_dict)
                     obs = env.step(action)
                     done = bool(obs.done)
                     steps += 1
-                score = float(env.state.cumulative_reward)
+                grader = grade_episode(
+                    task_id,
+                    env.state.actions_history,
+                    env._current_claim.get("ground_truth_decision", "Approve"),
+                    claim=env._current_claim,
+                )
+                score = float(grader["score"])
                 results[task_id] = BaselineTaskResult(score=score, steps=steps, done=done)
             except Exception as exc:
                 raise HTTPException(

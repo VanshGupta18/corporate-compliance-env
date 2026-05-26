@@ -21,7 +21,7 @@ def test_tasks_endpoint_is_available():
 
 def test_reset_endpoint_works_for_all_tasks():
     for task_id in ["easy", "medium", "hard"]:
-        response = client.post("/reset", params={"task_id": task_id})
+        response = client.post("/reset", json={"task_id": task_id})
         assert response.status_code == 200
         data = response.json()
         assert isinstance(data, dict)
@@ -33,7 +33,7 @@ def test_reset_endpoint_works_for_all_tasks():
 
 
 def test_state_endpoint_is_available():
-    client.post("/reset", params={"task_id": "easy"})
+    client.post("/reset", json={"task_id": "easy"})
     response = client.get("/state")
     assert response.status_code == 200
     data = response.json()
@@ -48,3 +48,24 @@ def test_openapi_contains_custom_paths():
     assert "/grader" in paths
     assert "/baseline" in paths
     assert "/demo/info" in paths
+
+
+def test_websocket_multi_step_episode():
+    """WebSocket session preserves state across steps (HTTP does not)."""
+    with client.websocket_connect("/ws") as ws:
+        ws.send_json({"type": "reset", "data": {"task_id": "easy"}})
+        reset_msg = ws.receive_json()
+        assert reset_msg.get("type") == "observation"
+        ws.send_json(
+            {
+                "type": "step",
+                "data": {
+                    "action_type": "ResolveTicket",
+                    "decision": "Approve",
+                    "reason": "Test resolution.",
+                },
+            }
+        )
+        step_msg = ws.receive_json()
+        assert step_msg.get("type") == "observation"
+        assert step_msg.get("data", {}).get("done") is True

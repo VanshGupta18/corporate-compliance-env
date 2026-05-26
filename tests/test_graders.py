@@ -1,72 +1,73 @@
+"""Grader tests — unit tests run offline; integration tests need live server."""
+
+import os
 import pytest
-from app.client import ComplianceEnvClient
-from app.models import ComplianceAction
 
-API_URL = "http://localhost:8000"
+from app.graders import grade_easy, grade_medium, grade_hard, grade_episode
 
-# --- Grader Tests for 'easy' tasks ---
-# NOTE: Using .sync() context manager to keep WebSocket connection open through episode
+pytestmark = pytest.mark.integration
 
-def test_easy_grader_correct_approval():
-    """Tests grader gives full score for a correct 'Approve' on an easy task."""
-    with ComplianceEnvClient(base_url=API_URL).sync() as client:
-        # Reset and get an easy task observation
+
+def test_easy_grader_correct_approval_unit():
+    actions = [
+        {
+            "action_type": "ResolveTicket",
+            "decision": "Approve",
+            "reason": "Meal under Rs500 per policy rule 1.",
+        }
+    ]
+    r = grade_easy(actions, "Approve")
+    assert r["score"] >= 0.8
+
+
+def test_medium_grader_useful_search_unit():
+    claim = {"rule_keyword": "daytime cab"}
+    actions = [
+        {"action_type": "SearchPolicy", "query": "daytime cab manager"},
+        {
+            "action_type": "ResolveTicket",
+            "decision": "Reject",
+            "reason": "Missing manager note.",
+        },
+    ]
+    r = grade_medium(actions, "Reject", claim)
+    assert r["components"]["useful_search"] > 0
+
+
+def test_hard_grader_document_request_unit():
+    claim = {"rule_keyword": "large meal", "required_document": "manager_approval"}
+    actions = [
+        {"action_type": "SearchPolicy", "query": "large meal"},
+        {
+            "action_type": "RequestInformation",
+            "message": "Please provide manager_approval",
+        },
+        {
+            "action_type": "ResolveTicket",
+            "decision": "Approve",
+            "reason": "Documents complete.",
+        },
+    ]
+    r = grade_hard(actions, "Approve", claim)
+    assert r["components"]["correct_document_request"] > 0
+
+
+@pytest.mark.skipif(
+    not os.getenv("COMPLIANCE_API_URL"),
+    reason="Set COMPLIANCE_API_URL to run live WebSocket grader integration tests",
+)
+def test_live_easy_episode():
+    from app.client import ComplianceEnvClient
+    from app.models import ComplianceAction
+
+    api_url = os.getenv("COMPLIANCE_API_URL", "http://127.0.0.1:7860")
+    with ComplianceEnvClient(base_url=api_url).sync() as client:
         result = client.reset(task_id="easy")
-        
-        # Make a decision (in easy tasks we just decide directly)
-        action = ComplianceAction(action_type="ResolveTicket", decision="Approve", reason="Looks good.")
-        response = client.step(action)
-        
-        # Extract done - handle both dict and object formats
-        done = response.get("done") if isinstance(response, dict) else response.done
-        
-        # Check that episode terminated
-        assert done == True
-
-def test_easy_grader_correct_rejection():
-    """Tests grader gives full score for a correct 'Reject' on an easy task."""
-    with ComplianceEnvClient(base_url=API_URL).sync() as client:
-        client.reset(task_id="easy")
-        
-        action = ComplianceAction(action_type="ResolveTicket", decision="Reject", reason="Policy violation.")
-        response = client.step(action)
-        
-        done = response.get("done") if isinstance(response, dict) else response.done
-        assert done == True
-
-def test_easy_grader_incorrect_decision():
-    """Tests grader gives negative score for an incorrect decision on an easy task."""
-    with ComplianceEnvClient(base_url=API_URL).sync() as client:
-        client.reset(task_id="easy")
-        
-        action = ComplianceAction(action_type="ResolveTicket", decision="Approve", reason="Made a decision.")
-        response = client.step(action)
-        
-        done = response.get("done") if isinstance(response, dict) else response.done
-        assert done == True
-
-# --- Placeholder tests for 'medium' and 'hard' tasks ---
-# These are more complex as they involve multi-step interactions.
-# The environment logic will need to be expanded to fully support these tests.
-
-def test_medium_grader_searched_and_correct_placeholder():
-    """
-    Placeholder: Medium task where agent searches policy and is correct.
-    """
-    # TODO:
-    # 1. Find a medium task from the dataset.
-    # 2. Step 1: client.step(action_type="SearchPolicy", ...).
-    # 3. Step 2: client.step(action_type="ResolveTicket", decision=correct_decision).
-    # 4. Assert final reward/score is 1.0 (will require grader logic).
-    pass
-
-def test_hard_grader_full_credit_placeholder():
-    """
-    Placeholder: Hard task where agent requests info and is correct.
-    """
-    # TODO:
-    # 1. Find a hard task from the dataset.
-    # 2. Step 1: client.step(action_type="RequestInformation", ...).
-    # 3. Step 2: client.step(action_type="ResolveTicket", decision=correct_decision).
-    # 4. Assert final reward/score is 1.0 (will require grader logic).
-    pass
+        step = client.step(
+            ComplianceAction(
+                action_type="ResolveTicket",
+                decision="Approve",
+                reason="Integration test.",
+            )
+        )
+        assert step.done is True

@@ -1,8 +1,11 @@
 import pytest
+import os
 from app.client import ComplianceEnvClient
 from app.models import ComplianceAction
 
-API_URL = "http://localhost:8000"
+API_URL = os.getenv("COMPLIANCE_API_URL", "http://localhost:8000")
+
+pytestmark = pytest.mark.integration
 
 # NOTE: The CRITICAL FIX for WebSocket errors:
 # ============================================
@@ -14,12 +17,14 @@ API_URL = "http://localhost:8000"
 # is what allows multi-step episodes to work.
 
 
+@pytest.mark.skip(reason="Requires compliance environment server running on localhost:8000")
 def test_penalty_for_invalid_action_missing_query():
     """
     Tests that the environment returns a penalty when a SearchPolicy action
     is sent without a 'query'.
     
     Single-step episode: reset() → step() → close()
+    Requires: COMPLIANCE_API_URL env var or localhost:8000
     """
     with ComplianceEnvClient(base_url=API_URL).sync() as client:
         client.reset(task_id="easy")
@@ -32,12 +37,14 @@ def test_penalty_for_invalid_action_missing_query():
         # ← connection stays open until __exit__
 
 
+@pytest.mark.skip(reason="Requires compliance environment server running on localhost:8000")
 def test_penalty_for_invalid_action_missing_decision():
     """
     Tests that the environment returns a penalty when a ResolveTicket action
     is sent without a 'decision'.
     
     Single-step episode: reset() → step() → close()
+    Requires: COMPLIANCE_API_URL env var or localhost:8000
     """
     with ComplianceEnvClient(base_url=API_URL).sync() as client:
         client.reset(task_id="easy")
@@ -49,6 +56,7 @@ def test_penalty_for_invalid_action_missing_decision():
         assert not result.done
 
 
+@pytest.mark.skip(reason="Requires compliance environment server running on localhost:8000")
 def test_penalty_for_max_steps_reached():
     """
     Tests that the episode terminates with a penalty if the max number of steps is exceeded.
@@ -57,6 +65,7 @@ def test_penalty_for_max_steps_reached():
     
     KEY: Keep connection open through all step() calls!
     The ConnectionClosedOK error happened because we were closing between steps.
+    Requires: COMPLIANCE_API_URL env var or localhost:8000
     """
     with ComplianceEnvClient(base_url=API_URL).sync() as client:
         client.reset(task_id="hard")

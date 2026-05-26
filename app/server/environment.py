@@ -1,44 +1,85 @@
 import json
-from pathlib import Path
+import os
 import random
 import uuid
+from pathlib import Path
+from typing import Dict
+
 from openenv.core.env_server import Environment
+
 from app.models import ComplianceAction, ComplianceObservation, ComplianceState
+from app.policy_snippets import document_simulation, match_policy_snippet
 
 
 class ComplianceEnv(Environment):
-    # ✅ Enable concurrent WebSocket sessions
-    # This allows multiple clients to connect simultaneously instead of limiting to 1
     SUPPORTS_CONCURRENT_SESSIONS = True
-    
+
     def __init__(self):
-        # Load data/policy.md and data/claims.json here
+        super().__init__()
         self.datadir = Path(__file__).parent.parent.parent / "data"
-        with open(self.datadir / "claims.json") as f:
-            self.claims = json.load(f)["claims"]
-        with open(self.datadir / "policy.md") as f:
+        self._load_claims()
+        with open(self.datadir / "policy.md", encoding="utf-8") as f:
             self.policy = f.read()
-        
+
         self._state = ComplianceState()
-        self._current_claim = None  # Store current claim
-        self.max_steps = 5  # Default, will be set per task in reset()
-        # Task-based max_steps: Easy=3, Medium=5, Hard=8
+        self._current_claim = None
+        self.max_steps = 5
         self.task_max_steps = {"easy": 3, "medium": 5, "hard": 8}
 
+        # Per-episode hidden state
+        self._policy_revealed = False
+        self._useful_search = False
+        self._document_received = False
+        self._env_message = ""
+        self._claims_by_id: Dict[str, dict] = {}
+
+    def _load_claims(self):
+        """Load all claims and retain split labels for deterministic evaluation."""
+        splits_dir = self.datadir / "splits"
+        all_claims = []
+        if splits_dir.exists():
+            for split in ("train", "validation", "test"):
+                path = splits_dir / f"{split}.json"
+                if path.exists():
+                    with open(path, encoding="utf-8") as f:
+                        data = json.load(f)
+                        for claim in data.get("claims", []):
+                            claim.setdefault("split", split)
+                            all_claims.append(claim)
+        if not all_claims:
+            with open(self.datadir / "claims.json", encoding="utf-8") as f:
+                all_claims = json.load(f)["claims"]
+        self.claims = all_claims
+        self._claims_by_id = {c["id"]: c for c in all_claims}
 
     def reset(self, seed=None, episode_id=None, **kwargs):
         task_id = kwargs.get("task_id", "easy")
-        # Set max_steps based on task difficulty
+        split = kwargs.get("split") or os.getenv("COMPLIANCE_SPLIT", "train")
         self.max_steps = self.task_max_steps.get(task_id, 5)
-        
-        # Filter claims by task_difficulty
-        filtered_claims = [claim for claim in self.claims if claim["task_difficulty"] == task_id]
-        if not filtered_claims:
-            # Fallback to any claim if no claim with the given difficulty is found
-            self._current_claim = random.choice(self.claims)
-        else:
-            self._current_claim = random.choice(filtered_claims)
 
+        claim_id = kwargs.get("claim_id")
+        if claim_id and claim_id in self._claims_by_id:
+            self._current_claim = dict(self._claims_by_id[claim_id])
+        else:
+            filtered = [
+                c
+                for c in self.claims
+                if c.get("task_difficulty") == task_id and c.get("split", "train") == split
+            ]
+            if not filtered:
+                filtered = [c for c in self.claims if c.get("task_difficulty") == task_id]
+            if seed is not None:
+                rng = random.Random(seed)
+                self._current_claim = dict(rng.choice(filtered if filtered else self.claims))
+            else:
+                self._current_claim = dict(
+                    random.choice(filtered if filtered else self.claims)
+                )
+
+        self._policy_revealed = False
+        self._useful_search = False
+        self._document_received = False
+        self._env_message = ""
 
         self._state = ComplianceState(
             episode_id=episode_id or str(uuid.uuid4()),
@@ -46,157 +87,176 @@ class ComplianceEnv(Environment):
             step_count=0,
             is_done=False,
         )
-        # Return first observation
         return self._get_observation()
 
-
     def _has_searched_policy(self) -> bool:
-        """Returns True if agent has called SearchPolicy at least once this episode."""
         return any(
-            a.get("action_type") == "SearchPolicy"
-            for a in self._state.actions_history
+            a.get("action_type") == "SearchPolicy" for a in self._state.actions_history
         )
 
     def _has_requested_info(self) -> bool:
-        """Returns True if agent has called RequestInformation at least once this episode."""
         return any(
             a.get("action_type") == "RequestInformation"
             for a in self._state.actions_history
         )
 
-    def step(self, action: ComplianceAction, timeout_s=None, **kwargs):
-        self._state.step_count += 1
-        reward = 0.0
-        done = False
-        task_id = self._state.task_id or "easy"
+    def _check_max_steps(self, reward: float) -> tuple[float, bool]:
+        if self._state.step_count >= self.max_steps and not self._state.is_done:
+            self._state.is_done = True
+            self._env_message = "Maximum steps reached. Episode terminated."
+            return reward - 0.5, True
+        return reward, False
 
-        # ----------------------------------------------------------------
-        # SearchPolicy action handling
-        # ----------------------------------------------------------------
-        if action.action_type == "SearchPolicy":
-            if not action.query:
-                reward = -0.1  # Penalty for empty query
-            elif task_id == "easy":
-                # Easy: rule_keyword is visible in observation — searching
-                # means the agent ignored the context it was given.
-                reward = -0.05
-            elif task_id == "medium":
-                # Medium: policy rule is deliberately hidden — searching
-                # is the correct first step.
-                reward = 0.1
-            else:
-                # Hard: search is allowed but the main challenge is the
-                # missing document — give a small positive to not block it,
-                # but less than a proper RequestInformation.
-                reward = 0.05
-
-            self._state.rewards_history.append(reward)
-            self._state.actions_history.append(action.model_dump())
-            self._state.cumulative_reward += reward
-            return self._get_observation()
-
-        # ----------------------------------------------------------------
-        # RequestInformation action handling
-        # ----------------------------------------------------------------
-        if action.action_type == "RequestInformation":
-            has_missing_doc = bool(
-                self._current_claim and self._current_claim.get("missing_document")
-            )
-            if has_missing_doc:
-                reward = 0.1   # Correct: doc is genuinely missing
-            else:
-                reward = -0.2  # Penalise: agent asked for something that exists
-
-            self._state.rewards_history.append(reward)
-            self._state.actions_history.append(action.model_dump())
-            self._state.cumulative_reward += reward
-            return self._get_observation()
-
-        # ----------------------------------------------------------------
-        # ResolveTicket action handling
-        # ----------------------------------------------------------------
-        if action.action_type == "ResolveTicket":
-            if not action.decision or not action.reason:
-                reward = -0.1
-                self._state.rewards_history.append(reward)
-                self._state.actions_history.append(action.model_dump())
-                self._state.cumulative_reward += reward
-                return self._get_observation()
-
-            # Prerequisite penalties: widen the gap between good and random.
-            # These are applied BEFORE the correctness reward so they accumulate
-            # in the episode reward even if the final decision is correct.
-            if task_id == "medium" and not self._has_searched_policy():
-                # Skipped policy lookup on a task where the rule is hidden.
-                reward += -0.2
-
-            if task_id == "hard":
-                has_missing_doc = bool(
-                    self._current_claim and self._current_claim.get("missing_document")
-                )
-                if has_missing_doc and not self._has_requested_info():
-                    # Resolved without gathering the missing document.
-                    reward += -0.25
-
-            is_correct = (
-                self._current_claim
-                and action.decision == self._current_claim.get("ground_truth_decision")
-            )
-            reward += 1.0 if is_correct else -1.0
-            done = True
-            self._state.is_done = done
-
-            self._state.rewards_history.append(reward)
-            self._state.actions_history.append(action.model_dump())
-            self._state.cumulative_reward += reward
-
-            return self._get_observation()
-
-        # ----------------------------------------------------------------
-        # Unknown / invalid action type
-        # ----------------------------------------------------------------
-        if self._state.step_count >= self.max_steps:
-            done = True
-            reward = -0.5  # Penalty for running out of steps
-            self._state.is_done = done
-
+    def _finalize_step(self, reward: float, action: ComplianceAction) -> ComplianceObservation:
         self._state.rewards_history.append(reward)
         self._state.actions_history.append(action.model_dump())
         self._state.cumulative_reward += reward
-        self._state.is_done = done
-
-        print(f"Step {self._state.step_count}: Action={action.action_type}, Reward={reward}, Done={done}")
+        reward, forced_done = self._check_max_steps(reward)
+        if forced_done:
+            self._state.rewards_history[-1] = reward
+            self._state.cumulative_reward = sum(self._state.rewards_history)
         return self._get_observation()
 
+    def step(self, action: ComplianceAction, timeout_s=None, **kwargs):
+        if self._state.is_done:
+            raise RuntimeError("Episode already done. Call reset() first.")
+
+        self._state.step_count += 1
+        reward = 0.0
+        task_id = self._state.task_id or "easy"
+        claim = self._current_claim or {}
+
+        if action.action_type == "SearchPolicy":
+            if not action.query:
+                reward = -0.1
+                self._env_message = "SearchPolicy requires a non-empty query."
+            elif task_id == "easy":
+                reward = -0.15
+                self._env_message = "Easy tasks do not require policy search. Resolve directly."
+            else:
+                snippet, relevant = match_policy_snippet(
+                    claim.get("rule_keyword", ""), action.query or ""
+                )
+                self._policy_revealed = True
+                self._useful_search = relevant
+                self._env_message = snippet
+                reward = 0.15 if relevant else -0.05
+
+            return self._finalize_step(reward, action)
+
+        if action.action_type == "RequestInformation":
+            if task_id == "easy":
+                reward = -0.15
+                self._env_message = "Easy tasks do not require document requests."
+            else:
+                required = (
+                    claim.get("missing_document")
+                    or claim.get("required_document")
+                )
+                msg = (action.message or "").lower()
+                if not required:
+                    reward = -0.2
+                    self._env_message = "No missing document on this ticket."
+                elif (
+                    required in msg
+                    or required.replace("_", " ") in msg
+                    or required.replace("_", "") in msg.replace("_", "").replace(" ", "")
+                ):
+                    self._document_received = True
+                    doc_type = required
+                    self._env_message = document_simulation(doc_type, claim)
+                    if claim.get("document_outcome") == "provided":
+                        claim["missing_document"] = None
+                        claim["_document_cleared"] = True
+                    reward = 0.15
+                else:
+                    reward = -0.1
+                    self._env_message = (
+                        f"Requested document does not match required '{required}'. "
+                        "Be specific in your request message."
+                    )
+
+            return self._finalize_step(reward, action)
+
+        if action.action_type == "ResolveTicket":
+            if not action.decision or not action.reason:
+                reward = -0.1
+                return self._finalize_step(reward, action)
+
+            if task_id == "medium" and not self._has_searched_policy():
+                reward -= 0.25
+            elif task_id == "medium" and not self._useful_search:
+                reward -= 0.15
+
+            if task_id == "hard":
+                required = claim.get("missing_document") or claim.get("required_document")
+                if required and not self._document_received:
+                    reward -= 0.3
+                if not self._has_searched_policy():
+                    reward -= 0.15
+
+            gt = claim.get("ground_truth_decision")
+            is_correct = action.decision == gt or str(action.decision) == str(gt)
+            reward += 1.0 if is_correct else -1.0
+            self._state.is_done = True
+
+            return self._finalize_step(reward, action)
+
+        reward = -0.1
+        return self._finalize_step(reward, action)
+
+    def _visible_description(self, claim: dict, task_id: str) -> str:
+        if task_id == "medium" and claim.get("vague_description"):
+            return claim["vague_description"]
+        if task_id == "hard" and claim.get("vague_description"):
+            return claim["vague_description"]
+        return claim.get("description", "")
+
+    def _visible_rule_keyword(self, claim: dict, task_id: str) -> str:
+        if task_id == "easy":
+            return claim.get("rule_keyword", "unknown")
+        if self._policy_revealed:
+            return claim.get("rule_keyword", "unknown")
+        return "hidden"
+
+    def _visible_missing_document(self, claim: dict, task_id: str) -> str | None:
+        md = claim.get("missing_document") or claim.get("required_document")
+        if task_id == "easy":
+            return claim.get("missing_document")
+        if self._document_received or claim.get("_document_cleared"):
+            return None
+        if task_id in ("medium", "hard") and md:
+            return "required"  # hide exact type until requested
+        return claim.get("missing_document")
 
     def _get_observation(self):
         if not self._current_claim:
-            # This should not happen in a normal flow
-            return None
-        
+            raise RuntimeError("No active claim. Call reset() before step().")
+
         claim = self._current_claim
+        task_id = self._state.task_id or "easy"
+
         obs = ComplianceObservation(
             done=self._state.is_done,
             reward=self._state.rewards_history[-1] if self._state.rewards_history else None,
-            ticket_id=claim.get("id", "UNKNOWN"),  # Use "id" field from claims
+            ticket_id=claim.get("id", "UNKNOWN"),
             employee_name=claim["employee_name"],
             employee_role=claim["employee_role"],
             employee_level=claim["employee_level"],
             amount=claim["amount"],
             currency=claim["currency"],
-            description=claim["description"],
+            description=self._visible_description(claim, task_id),
             has_receipt=claim["has_receipt"],
-            missing_document=claim.get("missing_document"),
-            rule_keyword=claim["rule_keyword"],
+            missing_document=self._visible_missing_document(claim, task_id),
+            rule_keyword=self._visible_rule_keyword(claim, task_id),
             risk_score=claim["risk_score"],
-            env_message="",
+            env_message=self._env_message,
             step_count=self._state.step_count,
             max_steps=self.max_steps,
-            ground_truth_decision=claim.get("ground_truth_decision") if self._state.is_done else None,
+            ground_truth_decision=None,
         )
         self._state.current_observation = obs
         return obs
-
 
     @property
     def state(self):

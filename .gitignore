@@ -68,6 +68,15 @@ pip-wheel-metadata/
 data/generated_*.json
 data/temp_*.json
 
+# ── Runtime / training artifacts (regenerate locally) ──
+baseline_results.json
+inference_results.json
+training/data/
+training/logs/
+training/checkpoints/
+*.jsonl
+!data/splits/*.json
+
 # ── MyPy / Type checking ──────────────────────────────
 .mypy_cache/
 .dmypy.json

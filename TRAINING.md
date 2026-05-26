@@ -1,98 +1,183 @@
-# Training and Publishing Guide
+# Colab Training Runbook (Unsloth SFT + GRPO)
 
-This project now includes a low-cost training pipeline for SFT + GRPO with Unsloth/TRL.
+This guide targets **Google Colab** with a T4 GPU. You do **not** need a local GPU or a running WebSocket server for training or evaluation — rollouts use the in-process `ComplianceEnv`.
 
-Recommended base model for Colab T4: `Qwen/Qwen2.5-3B-Instruct`.
+Default model: `unsloth/Qwen2.5-3B-Instruct-bnb-4bit`  
+Default T4 settings: `max_seq_length=512`, `batch_size=1`, `grad_accum=8`, `num_generations=2`
 
-## 1) Setup
+## 0) Colab setup
 
-```bash
-pip install -r training/requirements-training.txt
+```python
+# Cell 1 — clone (adjust URL to your fork)
+!git clone https://github.com/YOUR_USER/meta-openenv.git
+%cd meta-openenv
+
+# Cell 2 — install pinned training deps
+!pip install -q -r training/requirements-training.txt
+
+# Cell 3 — verify wiring (no GPU model load)
+!python training/smoke_test.py
 ```
 
-Start the environment server:
+Optional: regenerate claims if missing splits:
 
 ```bash
-uvicorn app.server.app:app --host 0.0.0.0 --port 7860
+!python data/generate_dataset.py --train-per-diff 120 --val-per-diff 40 --test-per-diff 40
 ```
 
-Open the read-only monitor:
-- `http://localhost:7860/demo`
-- It auto-refreshes episode logs from `training/logs/episodes.jsonl`
-- It auto-refreshes training metrics from `training/logs/grpo_metrics.jsonl`
+## 1) Prepare SFT data
 
-## 2) Prepare Trajectories
+`generate_dataset.py` creates **tickets** (claims). `prepare_data.py` turns heuristic rollouts into **prompt/response** rows for SFT (and GRPO prompts).
 
 ```bash
-python training/prepare_data.py --episodes-per-task 40
+!python training/prepare_data.py --episodes-per-task 40 --split train
 ```
 
-This writes:
+Outputs:
 - `training/data/trajectories.json`
 - `training/data/sft_dataset.jsonl`
 
-## 3) SFT Warm Start (QLoRA-ready)
+## 2) Baseline learning curve (optional)
 
 ```bash
-python training/sft_train.py \
-  --model-id Qwen/Qwen2.5-3B-Instruct \
-  --dataset-path training/data/sft_dataset.jsonl \
-  --output-dir training/checkpoints/sft
+!python training/learning_curve.py --stage stage_0_baseline --step 0
 ```
 
-## 4) GRPO Post-Training
+Logs to `training/logs/learning_curve.jsonl` with per-difficulty scores.
+
+## 3) SFT warm start (Unsloth QLoRA)
 
 ```bash
-python training/grpo_train.py \
+!python training/sft_train.py \
   --model-id unsloth/Qwen2.5-3B-Instruct-bnb-4bit \
   --dataset-path training/data/sft_dataset.jsonl \
-  --api-url http://127.0.0.1:7860 \
-  --output-dir training/checkpoints/grpo \
-  --max-seq-length 768 \
+  --output-dir training/checkpoints/sft \
+  --max-length 512 \
   --batch-size 1 \
-  --grad-accum 8 \
-  --num-generations 4 \
-  --log-file training/logs/grpo_metrics.jsonl
+  --grad-accum 8
 ```
 
-Colab T4 note:
-- Keep `max-seq-length` low (`512-768`) if you hit OOM.
-- Start with `num-generations=4`; reduce to `2` for memory pressure.
-
-## 5) Evaluate Checkpoint
+Dry-run (dataset only):
 
 ```bash
-python training/eval_checkpoint.py \
+!python training/sft_train.py --dry-run
+```
+
+The SFT checkpoint directory is loaded directly by GRPO via `--sft-checkpoint`.
+
+## 4) GRPO with curriculum stages
+
+Curriculum stages (easy → hard):
+
+| Stage | Tasks trained |
+|-------|----------------|
+| `stage_1_easy` | easy only |
+| `stage_2_medium` | easy + medium (weighted) |
+| `stage_3_hard` | easy + medium + hard (weighted) |
+
+**Stage 1 — easy only**
+
+```bash
+!python training/grpo_train.py \
+  --sft-checkpoint training/checkpoints/sft \
+  --curriculum-stage stage_1_easy \
+  --output-dir training/checkpoints/grpo_stage1 \
+  --max-seq-length 512 \
+  --num-generations 2 \
+  --batch-size 1 \
+  --grad-accum 8 \
+  --max-train-steps 100
+```
+
+**Stage 2 — add medium**
+
+```bash
+!python training/grpo_train.py \
+  --sft-checkpoint training/checkpoints/grpo_stage1 \
+  --curriculum-stage stage_2_medium \
+  --output-dir training/checkpoints/grpo_stage2 \
+  --max-train-steps 100
+```
+
+**Stage 3 — full curriculum**
+
+```bash
+!python training/grpo_train.py \
+  --sft-checkpoint training/checkpoints/grpo_stage2 \
+  --curriculum-stage stage_3_hard \
+  --output-dir training/checkpoints/grpo \
+  --max-train-steps 200
+```
+
+GRPO uses **in-process** env by default (`--use-local-env`). No `uvicorn` required on Colab.
+
+Metrics:
+- `training/logs/grpo_metrics.jsonl` — trainer logs
+- `training/logs/learning_curve.jsonl` — validation curve after each stage
+
+Dry-run:
+
+```bash
+!python training/grpo_train.py --dry-run --curriculum-stage stage_1_easy
+```
+
+If dry-run fails with `rollout_func` missing, upgrade TRL:
+
+```bash
+!pip install -U "trl>=0.14.0"
+```
+
+## 5) Evaluate checkpoint (local env)
+
+```bash
+!python training/eval_checkpoint.py \
   --checkpoint training/checkpoints/grpo \
-  --api-url http://127.0.0.1:7860 \
+  --split validation \
   --episodes 10 \
   --episode-log-file training/logs/episodes.jsonl \
   --clear-log
 ```
 
-Use this report against baseline `/baseline` output before publishing.
+Compare eval `overall_grader_mean` to baseline `mean_grader_score` from `python app/baseline.py` or the dashboard.
 
-## Colab T4 quick run order
+## 6) Memory tips (T4)
 
-1. Launch API server.
-2. Generate dataset (`prepare_data.py`).
-3. Start GRPO (`grpo_train.py`) so `training/logs/grpo_metrics.jsonl` updates.
-4. Run `eval_checkpoint.py` periodically to append episode-by-episode logs.
-5. Watch `/demo` read-only monitor.
+- Keep `--max-seq-length 512` (raise only if you have headroom).
+- Use `--num-generations 2` (not 4) on T4.
+- Run curriculum **stages sequentially** and save adapters between stages.
+- If OOM: lower `max_completion_length` in `grpo_train.py` config or reduce `num-generations` to 1.
 
-## 6) Publish Adapter to Hugging Face
+## 7) Optional: remote server + demo monitor
+
+Only needed if you want the live WebSocket demo at `/demo`:
 
 ```bash
-huggingface-cli login
+!uvicorn app.server.app:app --host 0.0.0.0 --port 7860
 ```
 
+Then evaluate with:
+
 ```bash
-python training/publish_adapter.py \
+!python training/eval_checkpoint.py --use-remote-env --api-url http://127.0.0.1:7860
+```
+
+## 8) Publish adapter
+
+```bash
+!huggingface-cli login
+!python training/publish_adapter.py \
   --checkpoint training/checkpoints/grpo \
   --repo-id YOUR_USERNAME/compliance-grpo-adapter
 ```
 
-## 7) Use the Adapter in Demo/Inference
+## Local (non-Colab) quick reference
 
-- Point inference to your adapter/base model combination.
-- Add adapter model ID in dashboard auto-run options if you want side-by-side baseline vs trained model.
+```bash
+pip install -e ".[training]"
+python training/smoke_test.py
+python training/prepare_data.py --episodes-per-task 40
+python training/sft_train.py --dry-run
+python -m pytest tests/test_training_smoke.py -q
+```
+
+Training still requires a CUDA GPU; use Colab if you have no local GPU.

@@ -27,18 +27,11 @@ dependencies = [
     "fastapi",
     "uvicorn[standard]",
     "pydantic",
-    "pytest",
     "openenv-core",
     "requests",
     "gradio",
     "huggingface-hub",
-    "accelerate>=1.2.0",
-    "datasets>=3.2.0",
-    "peft>=0.14.0",
-    "transformers>=4.47.0",
-    "trl>=0.14.0",
-    "unsloth>=2026.4.6",
-    "torch>=2.10.0",
+    "PyYAML",
 ]
 
 [project.optional-dependencies]
@@ -46,6 +39,16 @@ dev = [
     "pytest>=7.0",
     "black",
     "ruff",
+]
+training = [
+    "accelerate>=1.12.0",
+    "datasets>=3.6.0",
+    "peft>=0.18.0",
+    "transformers>=4.57.0",
+    "trl>=0.14.0",
+    "unsloth>=2026.4.6",
+    "torch>=2.5.0",
+    "bitsandbytes>=0.45.0",
 ]
 
 [project.scripts]
@@ -56,8 +59,8 @@ Homepage = "https://github.com/VanshGupta18/corporate-compliance-env"
 Repository = "https://github.com/VanshGupta18/corporate-compliance-env.git"
 Documentation = "https://huggingface.co/spaces/mcqueenmater/env-corporate"
 
-[tool.setuptools]
-packages = ["app"]
+[tool.setuptools.packages.find]
+include = ["app*", "server*"]
 
 [tool.setuptools.package-data]
 app = ["py.typed"]
@@ -69,3 +72,8 @@ target-version = ['py311']
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as requiring environment server (skip if not running)",
+]

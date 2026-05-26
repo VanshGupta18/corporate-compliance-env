@@ -1,134 +1,168 @@
 """
-Grading logic for different task difficulties.
-Scores episodes based on task type (easy/medium/hard).
+Component-based grading for curriculum easy / medium / hard tasks.
 """
 
-from typing import List, Dict, Any
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
+
+from app.policy_snippets import match_policy_snippet
 
 
-def grade_easy(actions_history: List[Dict[str, Any]], ground_truth_decision: str) -> float:
-    """
-    Easy task: Single-step classification.
-    Score = 0.99 if correct decision, 0.01 otherwise (strictly between 0 and 1).
-    """
-    if not actions_history:
-        return 0.01
-    
-    final_action = actions_history[-1]
-    if final_action.get("action_type") == "ResolveTicket":
-        decision = final_action.get("decision")
-        if decision == ground_truth_decision:
-            return 0.99
-    
-    return 0.01
+def _final_resolve(actions_history: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    for action in reversed(actions_history):
+        if action.get("action_type") == "ResolveTicket":
+            return action
+    return None
 
 
-def grade_medium(actions_history: List[Dict[str, Any]], ground_truth_decision: str) -> float:
-    """
-    Medium task: Policy retrieval + classification.
-    
-    Score breakdown:
-    - 0.99: Correct decision AND searched policy
-    - 0.5: Correct decision but NO search (lucky guess)
-    - 0.01: Wrong decision (strictly between 0 and 1)
-    """
-    if not actions_history:
-        return 0.01
-    
-    # Check if agent searched policy
-    searched_policy = any(
-        action.get("action_type") == "SearchPolicy" 
-        for action in actions_history
+def _useful_search(actions_history: List[Dict[str, Any]], rule_keyword: str) -> bool:
+    for action in actions_history:
+        if action.get("action_type") != "SearchPolicy":
+            continue
+        query = action.get("query") or ""
+        _, relevant = match_policy_snippet(rule_keyword, query)
+        if relevant:
+            return True
+    return False
+
+
+def _correct_document_request(
+    actions_history: List[Dict[str, Any]], required_document: Optional[str]
+) -> bool:
+    if not required_document:
+        return False
+    for action in actions_history:
+        if action.get("action_type") != "RequestInformation":
+            continue
+        msg = (action.get("message") or "").lower()
+        req = required_document.replace("_", " ").lower()
+        if req in msg or required_document in msg:
+            return True
+    return False
+
+
+def grade_easy(
+    actions_history: List[Dict[str, Any]],
+    ground_truth_decision: str,
+    claim: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    components = {
+        "valid_resolve": 0.0,
+        "correct_decision": 0.0,
+        "valid_reason": 0.0,
+        "no_unnecessary_tools": 0.0,
+    }
+    final = _final_resolve(actions_history)
+    if not final:
+        return {"score": 0.01, "components": components}
+
+    unnecessary = any(
+        a.get("action_type") in ("SearchPolicy", "RequestInformation")
+        for a in actions_history[:-1]
     )
-    
-    # Check if final decision is correct
-    final_action = actions_history[-1]
-    correct_decision = (
-        final_action.get("action_type") == "ResolveTicket" and
-        final_action.get("decision") == ground_truth_decision
-    )
-    
-    if correct_decision and searched_policy:
-        return 0.99
-    elif correct_decision and not searched_policy:
-        return 0.5  # Lucky guess (already strictly between 0 and 1)
-    else:
-        return 0.01
+    components["no_unnecessary_tools"] = 0.0 if unnecessary else 0.15
+    components["valid_resolve"] = 0.25
+
+    decision = final.get("decision")
+    if decision == ground_truth_decision:
+        components["correct_decision"] = 0.45
+    if final.get("reason") and len(str(final.get("reason", ""))) >= 8:
+        components["valid_reason"] = 0.15
+
+    score = sum(components.values())
+    return {"score": max(0.01, min(0.99, score)), "components": components}
+
+
+def grade_medium(
+    actions_history: List[Dict[str, Any]],
+    ground_truth_decision: str,
+    claim: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    claim = claim or {}
+    rule_keyword = claim.get("rule_keyword", "")
+    components = {
+        "useful_search": 0.0,
+        "correct_decision": 0.0,
+        "valid_reason": 0.0,
+        "minimal_steps": 0.0,
+    }
+
+    if _useful_search(actions_history, rule_keyword):
+        components["useful_search"] = 0.35
+
+    final = _final_resolve(actions_history)
+    if final:
+        if final.get("decision") == ground_truth_decision:
+            components["correct_decision"] = 0.45
+        if final.get("reason") and len(str(final.get("reason", ""))) >= 8:
+            components["valid_reason"] = 0.10
+
+    if len(actions_history) <= 3:
+        components["minimal_steps"] = 0.10
+
+    score = sum(components.values())
+    return {"score": max(0.01, min(0.99, score)), "components": components}
 
 
 def grade_hard(
     actions_history: List[Dict[str, Any]],
     ground_truth_decision: str,
-    requested_document: bool = False
-) -> float:
-    """
-    Hard task: Multi-turn contextual decision.
-    
-    Score breakdown (component-based, strictly between 0 and 1):
-    - identified_missing_doc: 0.3 (RequestInformation was called)
-    - correct_final_decision: 0.69 (ResolveTicket matches ground truth)
-    
-    Total: strictly between 0.01 and 0.99
-    """
-    if not actions_history:
-        return 0.01
-    
-    score = 0.0
-    
-    # Check if RequestInformation was called
-    requested_info = any(
-        action.get("action_type") == "RequestInformation"
-        for action in actions_history
-    )
-    
-    if requested_info:
-        score += 0.3  # Full credit for attempting to get information
-    
-    # Check if final decision is correct
-    final_action = actions_history[-1]
-    if (
-        final_action.get("action_type") == "ResolveTicket" and
-        final_action.get("decision") == ground_truth_decision
-    ):
-        score += 0.69  # Changed from 0.7 to 0.69 so max total is 0.99, not 1.0
-    
-    # Clamp to strictly between 0.01 and 0.99
-    return max(0.01, min(0.99, score))
+    claim: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    claim = claim or {}
+    rule_keyword = claim.get("rule_keyword", "")
+    required = claim.get("missing_document") or claim.get("required_document")
+
+    components = {
+        "useful_search": 0.0,
+        "correct_document_request": 0.0,
+        "correct_decision": 0.0,
+        "valid_reason": 0.0,
+        "no_max_step_failure": 0.0,
+    }
+
+    if _useful_search(actions_history, rule_keyword):
+        components["useful_search"] = 0.20
+
+    if _correct_document_request(actions_history, required):
+        components["correct_document_request"] = 0.25
+
+    final = _final_resolve(actions_history)
+    if final:
+        if final.get("decision") == ground_truth_decision:
+            components["correct_decision"] = 0.40
+        if final.get("reason") and len(str(final.get("reason", ""))) >= 10:
+            components["valid_reason"] = 0.10
+
+    max_steps = claim.get("max_steps") or 8
+    if len(actions_history) <= max_steps:
+        components["no_max_step_failure"] = 0.05
+
+    score = sum(components.values())
+    return {"score": max(0.01, min(0.99, score)), "components": components}
 
 
 def grade_episode(
     task_id: str,
     actions_history: List[Dict[str, Any]],
     ground_truth_decision: str,
-    requested_document: bool = False
+    claim: Optional[Dict[str, Any]] = None,
+    requested_document: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Main grading function for a completed episode.
-    
-    Args:
-        task_id: "easy", "medium", or "hard"
-        actions_history: List of actions taken during episode
-        ground_truth_decision: Expected correct decision
-        requested_document: Whether a document was requested (for hard tasks)
-    
-    Returns:
-        Dict with score, task_id, and details (score strictly between 0 and 1)
-    """
     if task_id == "easy":
-        score = grade_easy(actions_history, ground_truth_decision)
+        result = grade_easy(actions_history, ground_truth_decision, claim)
     elif task_id == "medium":
-        score = grade_medium(actions_history, ground_truth_decision)
+        result = grade_medium(actions_history, ground_truth_decision, claim)
     elif task_id == "hard":
-        score = grade_hard(actions_history, ground_truth_decision, requested_document)
+        result = grade_hard(actions_history, ground_truth_decision, claim)
     else:
-        score = 0.5  # Default middle value for unknown tasks
-    
-    # Final safety clamp to strictly between 0.01 and 0.99
-    score = max(0.01, min(0.99, score))
-    
+        result = {"score": 0.5, "components": {}}
+
     return {
-        "score": score,
+        "score": result["score"],
         "task_id": task_id,
         "num_steps": len(actions_history),
-        "details": f"Graded {task_id} task with {len(actions_history)} actions"
+        "components": result.get("components", {}),
+        "details": f"Graded {task_id} with component scores",
     }

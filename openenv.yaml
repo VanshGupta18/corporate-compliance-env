@@ -16,8 +16,11 @@ tasks:
       Self-contained ticket with all information visible.
       Agent must immediately call ResolveTicket.
     max_steps: 3
-    expected_steps: 1
+    expected_steps: "1"
     difficulty: easy
+    curriculum:
+      pre_rl_band: [0.70, 0.90]
+      post_rl_band: [0.85, 0.99]
 
   - id: medium
     name: policy_retrieval
@@ -25,8 +28,12 @@ tasks:
       Ticket provided but policy rule is hidden.
       Agent must SearchPolicy first, then resolve.
     max_steps: 5
-    expected_steps: 2
+    expected_steps: "2"
     difficulty: medium
+    curriculum:
+      pre_rl_band: [0.35, 0.65]
+      post_rl_band: [0.60, 0.90]
+      requires_useful_search: true
 
   - id: hard
     name: multi_turn_contextual_decision
@@ -36,6 +43,10 @@ tasks:
     max_steps: 8
     expected_steps: "3-4"
     difficulty: hard
+    curriculum:
+      pre_rl_band: [0.10, 0.40]
+      post_rl_band: [0.40, 0.75]
+      requires_search_and_document: true
 
 # Action space definition
 action:

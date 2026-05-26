@@ -189,12 +189,14 @@ def parse_model_response(response_text: str) -> Optional[Dict]:
     return None
 
 
-def run_episode(client: Any, task_id: str) -> Dict:
-    """Run a single episode on the given task."""
+def run_episode(client: Any, task_id: str, claim_id: str | None = None) -> Dict:
+    """Run a single episode on the given task (difficulty), optionally pinned to a claim."""
     print(f"[START] task={task_id.upper()} env=corporate-compliance-env model={MODEL_NAME}", flush=True)
 
-    # Reset environment
-    reset_result = client.reset(task_id=task_id)
+    reset_kwargs: Dict[str, Any] = {"task_id": task_id}
+    if claim_id:
+        reset_kwargs["claim_id"] = claim_id
+    reset_result = client.reset(**reset_kwargs)
     observation = reset_result.observation
 
     llm_client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
@@ -321,23 +323,77 @@ def run_episode(client: Any, task_id: str) -> Dict:
     success = episode_data["done"] and normalized_score > 0.5
     rewards_str = ",".join(f"{step['reward']:.2f}" for step in episode_data["steps"])
     print(f"[END] success={str(success).lower()} steps={len(episode_data['steps'])} score={normalized_score:.3f} rewards={rewards_str}", flush=True)
+    episode_data["grader_score"] = normalized_score
+    episode_data["actions_history"] = actions_history
     return episode_data
 
 
 def main() -> None:
-    """Main function to run inference on all tasks."""
+    """Main function to run inference on all claims and save results."""
     try:
         client = ComplianceEnvClient(base_url=COMPLIANCE_API).sync()
+        
+        claims_path = Path("data/claims.json")
+        if not claims_path.exists():
+            print("Claims file not found.")
+            return
+            
+        with open(claims_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            
+        # Prefer held-out test split for curriculum eval
+        test_path = Path("data/splits/test.json")
+        if test_path.exists():
+            with open(test_path, encoding="utf-8") as f:
+                claims = json.load(f).get("claims", [])
+        else:
+            claims = data.get("claims", [])
+
+        results_by_diff = {"easy": [], "medium": [], "hard": []}
+        all_scores = []
 
         with client:
-            for task_id in TASKS:
-                run_episode(client, task_id)
+            for claim in claims:
+                claim_id = claim["id"]
+                difficulty = claim["task_difficulty"]
+
+                print(f"Running inference for claim {claim_id} ({difficulty})...")
+                episode_data = run_episode(client, difficulty, claim_id=claim_id)
+
+                grader_result = grade_episode(
+                    task_id=difficulty,
+                    actions_history=episode_data.get("actions_history", []),
+                    ground_truth_decision=claim.get("ground_truth_decision", "Approve"),
+                    claim=claim,
+                )
+                score = float(grader_result["score"])
+                results_by_diff[difficulty].append(score)
+                all_scores.append(score)
+
+        metrics = {
+            "overall_metrics": {
+                "total_evaluations": len(all_scores),
+                "mean_grader_score": sum(all_scores) / len(all_scores) if all_scores else 0,
+            },
+            "performance_by_difficulty": {},
+        }
+
+        for diff, scores in results_by_diff.items():
+            metrics["performance_by_difficulty"][diff] = {
+                "mean_grader_score": sum(scores) / len(scores) if scores else 0,
+                "total": len(scores),
+            }
+            
+        with open("inference_results.json", "w", encoding="utf-8") as f:
+            json.dump(metrics, f, indent=2)
+            
+        print("Inference complete. Results saved to inference_results.json.")
 
     except Exception as e:
         import traceback
         print(f"ERROR: {e}", flush=True)
         traceback.print_exc()
 
-
 if __name__ == "__main__":
+    from pathlib import Path
     main()

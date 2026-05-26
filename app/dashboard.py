@@ -1,147 +1,287 @@
-"""Read-only Gradio monitor for training and episode logs."""
+"""Interactive Gradio Command Center for the Corporate Compliance Environment."""
 
 from __future__ import annotations
 
 import json
+import subprocess
+import threading
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import gradio as gr
+import pandas as pd
 
 
 def _read_jsonl(path: str, last_n: int = 200) -> List[Dict[str, Any]]:
     file_path = Path(path)
     if not file_path.exists():
         return []
-    lines = file_path.read_text(encoding="utf-8").splitlines()
-    selected = lines[-last_n:] if last_n > 0 else lines
-    rows: List[Dict[str, Any]] = []
-    for line in selected:
-        if line.strip():
-            try:
-                rows.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    return rows
+    try:
+        lines = file_path.read_text(encoding="utf-8").splitlines()
+        selected = lines[-last_n:] if last_n > 0 else lines
+        rows = []
+        for line in selected:
+            if line.strip():
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return rows
+    except Exception:
+        return []
 
 
-def _summary(episodes: List[Dict[str, Any]], metrics: List[Dict[str, Any]]) -> Dict[str, Any]:
-    if not episodes and not metrics:
-        return {"status": "waiting_for_logs", "message": "No logs yet. Start training/evaluation first."}
-
-    episode_rewards = [float(row.get("total_reward", 0.0)) for row in episodes if "total_reward" in row]
-    task_counts: Dict[str, int] = {}
-    for row in episodes:
-        task = row.get("task_id", "unknown")
-        task_counts[task] = task_counts.get(task, 0) + 1
-
-    latest_metric = metrics[-1] if metrics else {}
-    return {
-        "episodes_seen": len(episodes),
-        "avg_episode_reward": round(sum(episode_rewards) / len(episode_rewards), 4) if episode_rewards else None,
-        "tasks_seen": task_counts,
-        "latest_training_metric": latest_metric,
-    }
+def stream_command(command: List[str]):
+    """Generator to stream the output of a subprocess."""
+    process = subprocess.Popen(
+        command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1, universal_newlines=True
+    )
+    log_content = ""
+    for line in iter(process.stdout.readline, ""):
+        log_content += line
+        yield log_content
+    process.stdout.close()
+    process.wait()
+    yield log_content + f"\n--- Process finished with exit code {process.returncode} ---"
 
 
-def _kpi_html(summary: Dict[str, Any], latest_episode: Dict[str, Any]) -> str:
-    episodes_seen = summary.get("episodes_seen", 0)
-    avg_reward = summary.get("avg_episode_reward")
-    avg_reward_txt = f"{avg_reward:.3f}" if isinstance(avg_reward, float) else "n/a"
-    latest_task = latest_episode.get("task_id", "n/a")
-    latest_reward = latest_episode.get("total_reward")
-    latest_reward_txt = f"{latest_reward:.3f}" if isinstance(latest_reward, (int, float)) else "n/a"
+def parse_baseline() -> Tuple[str, pd.DataFrame]:
+    """Parse baseline_results.json and format it for the dashboard."""
+    baseline_path = Path("baseline_results.json")
+    if not baseline_path.exists():
+        return "Baseline has not been run or results cannot be found.", pd.DataFrame()
 
-    return f"""
-<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;">
-  <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
-    <div style="font-size:12px;color:#aaa;">Episodes Logged</div>
-    <div style="font-size:22px;font-weight:700;">{episodes_seen}</div>
-  </div>
-  <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
-    <div style="font-size:12px;color:#aaa;">Average Episode Reward</div>
-    <div style="font-size:22px;font-weight:700;">{avg_reward_txt}</div>
-  </div>
-  <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
-    <div style="font-size:12px;color:#aaa;">Latest Task</div>
-    <div style="font-size:22px;font-weight:700;">{latest_task}</div>
-  </div>
-  <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
-    <div style="font-size:12px;color:#aaa;">Latest Episode Reward</div>
-    <div style="font-size:22px;font-weight:700;">{latest_reward_txt}</div>
-  </div>
-</div>
-"""
+    try:
+        data = json.loads(baseline_path.read_text(encoding="utf-8"))
+        
+        # Support both old and new baseline_results formats
+        metrics = data.get("metrics", data)
+        overall = metrics.get("overall_metrics", metrics)
+        
+        acc = overall.get("accuracy", 0) * 100
+        total = overall.get("total_claims", overall.get("total_evaluations", 0))
+        
+        diffs = metrics.get("by_difficulty", metrics.get("performance_by_difficulty", {}))
+        
+        easy_acc = diffs.get("easy", {}).get("accuracy", 0) * 100
+        med_acc = diffs.get("medium", {}).get("accuracy", 0) * 100
+        hard_acc = diffs.get("hard", {}).get("accuracy", 0) * 100
+        
+        stats_html = f"""
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:20px;">
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Overall Score</div>
+            <div style="font-size:22px;font-weight:700;color:#2ecc71;">{acc:.1f}%</div>
+          </div>
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Total Claims</div>
+            <div style="font-size:22px;font-weight:700;">{total}</div>
+          </div>
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Easy Score</div>
+            <div style="font-size:22px;font-weight:700;color:#3498db;">{easy_acc:.1f}%</div>
+          </div>
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Medium Score</div>
+            <div style="font-size:22px;font-weight:700;color:#f39c12;">{med_acc:.1f}%</div>
+          </div>
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Hard Score</div>
+            <div style="font-size:22px;font-weight:700;color:#e74c3c;">{hard_acc:.1f}%</div>
+          </div>
+        </div>
+        """
+        
+        # Build confusion matrix dataframe
+        cm = metrics.get("confusion_matrix", {})
+        cm_data = []
+        for true_label, preds in cm.items():
+            row = {"Ground Truth": true_label}
+            row.update(preds)
+            cm_data.append(row)
+            
+        df = pd.DataFrame(cm_data) if cm_data else pd.DataFrame()
+        return stats_html, df
+
+    except Exception as e:
+        return f"Error parsing baseline results: {str(e)}", pd.DataFrame()
 
 
-def refresh_monitor(
-    episode_log_path: str,
-    metrics_log_path: str,
-    max_rows: int,
-) -> Tuple[str, Dict[str, Any], Dict[str, Any], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    episodes = _read_jsonl(episode_log_path, last_n=max_rows)
-    metrics = _read_jsonl(metrics_log_path, last_n=max_rows)
-    latest_episode = episodes[-1] if episodes else {}
-    summary = _summary(episodes, metrics)
-    return _kpi_html(summary, latest_episode), summary, latest_episode, episodes, metrics
+def parse_inference() -> Tuple[str, pd.DataFrame]:
+    """Parse inference_results.json and format it for the dashboard."""
+    inference_path = Path("inference_results.json")
+    if not inference_path.exists():
+        return "Inference has not been run or results cannot be found.", pd.DataFrame()
 
+    try:
+        data = json.loads(inference_path.read_text(encoding="utf-8"))
+        
+        metrics = data.get("metrics", data)
+        overall = metrics.get("overall_metrics", metrics)
+        
+        acc = overall.get("accuracy", 0) * 100
+        total = overall.get("total_evaluations", overall.get("total_claims", 0))
+        
+        diffs = metrics.get("performance_by_difficulty", metrics.get("by_difficulty", {}))
+        
+        easy_acc = diffs.get("easy", {}).get("accuracy", 0) * 100
+        med_acc = diffs.get("medium", {}).get("accuracy", 0) * 100
+        hard_acc = diffs.get("hard", {}).get("accuracy", 0) * 100
+        
+        stats_html = f"""
+        <div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;margin-bottom:20px;">
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Overall Score</div>
+            <div style="font-size:22px;font-weight:700;color:#2ecc71;">{acc:.1f}%</div>
+          </div>
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Total Claims</div>
+            <div style="font-size:22px;font-weight:700;">{total}</div>
+          </div>
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Easy Score</div>
+            <div style="font-size:22px;font-weight:700;color:#3498db;">{easy_acc:.1f}%</div>
+          </div>
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Medium Score</div>
+            <div style="font-size:22px;font-weight:700;color:#f39c12;">{med_acc:.1f}%</div>
+          </div>
+          <div style="padding:14px;border:1px solid #2a2a2a;border-radius:12px;background:#111;">
+            <div style="font-size:12px;color:#aaa;">Hard Score</div>
+            <div style="font-size:22px;font-weight:700;color:#e74c3c;">{hard_acc:.1f}%</div>
+          </div>
+        </div>
+        """
+        
+        cm = metrics.get("confusion_matrix", {})
+        cm_data = []
+        for true_label, preds in cm.items():
+            row = {"Ground Truth": true_label}
+            row.update(preds)
+            cm_data.append(row)
+            
+        df = pd.DataFrame(cm_data) if cm_data else pd.DataFrame()
+        return stats_html, df
+
+    except Exception as e:
+        return f"Error parsing inference results: {str(e)}", pd.DataFrame()
+
+
+def update_training_plots() -> Tuple[gr.Plot, pd.DataFrame]:
+    episodes = _read_jsonl("training/logs/episodes.jsonl", last_n=500)
+    df = pd.DataFrame(episodes)
+    if df.empty or "total_reward" not in df.columns:
+        return None, pd.DataFrame()
+        
+    df["episode"] = range(1, len(df) + 1)
+    
+    # We will use gr.LinePlot on the frontend, we just need to return the dataframe
+    return df, df
+
+
+def run_baseline_stream():
+    for log in stream_command(["bash", "-c", "source .venv/bin/activate && [ -f .env ] && set -a && source .env && set +a && PYTHONUNBUFFERED=1 python app/baseline.py"]):
+        yield log
+
+def run_train_stream():
+    for log in stream_command(["bash", "-c", "source .venv/bin/activate && [ -f .env ] && set -a && source .env && set +a && PYTHONUNBUFFERED=1 python training/grpo_train.py"]):
+        yield log
+
+def run_inference_sync():
+    import subprocess
+    subprocess.run(["bash", "-c", "source .venv/bin/activate && [ -f .env ] && set -a && source .env && set +a && python inference.py"], check=True)
+    return parse_inference()
 
 def build_demo() -> gr.Blocks:
-    """Create a read-only training monitor dashboard."""
-    with gr.Blocks(title="Corporate Compliance Training Monitor") as demo:
-        gr.Markdown("""
-# Corporate Compliance AI - OpenEnv Training Dashboard
-### RL-style LLM Decision System for Enterprise Expense Auditing
+    """Create the interactive execution Command Center dashboard."""
+    with gr.Blocks(title="Corporate Compliance Command Center") as demo:
+        gr.Markdown("# 🏛️ Corporate Policy Compliance Environment: Command Center")
+        
+        with gr.Row():
+            with gr.Column(scale=2):
+                gr.Markdown("""
+                ### The Challenge: Automating Expense Policy Auditing
+                Every company processes hundreds of expense reports, approval requests, and compliance tickets every day. Today, this requires human auditors who manually read policy documents and make judgement calls. 
+                
+                This **OpenEnv-compliant Reinforcement Learning environment** trains an RL agent to do exactly that — understand a request, retrieve the relevant policy rule, and make a compliant decision.
+                """)
+            with gr.Column(scale=1):
+                gr.HTML(
+                    "<div style='padding:10px 12px;border:1px solid #2a2a2a;border-radius:10px;background:#111;'>"
+                    "<b>Built with:</b> FastAPI • OpenEnv • Gradio • TRL/Unsloth<br/>"
+                    "<b>Domain:</b> Finance & Compliance<br/>"
+                    "</div>"
+                )
+                
+        gr.Markdown("### Execution Pipeline")
+        with gr.Row():
+            btn_baseline = gr.Button("🏃 Run Baseline System", variant="secondary")
+            btn_train = gr.Button("🧠 Train RLHF LLM Model", variant="primary")
+            btn_inference = gr.Button("🤖 Run LLM Inference", variant="secondary")
 
-This product demo shows how a language model improves in a custom OpenEnv environment:
-- **Episode-level actions** (SearchPolicy, RequestInformation, ResolveTicket)
-- **Reward trajectory** and completion quality
-- **Training metrics** from GRPO fine-tuning
-""")
+        gr.Markdown("---")
+        
+        gr.Markdown("### Baseline Agent Performance")
+        btn_refresh_baseline = gr.Button("🔄 Refresh Metrics")
+        baseline_kpis = gr.HTML()
+        baseline_cm = gr.Dataframe(label="Confusion Matrix")
+        
+        # Hidden init loading
+        demo.load(parse_baseline, outputs=[baseline_kpis, baseline_cm])
+        btn_refresh_baseline.click(parse_baseline, outputs=[baseline_kpis, baseline_cm])
 
-        gr.HTML(
-            "<div style='padding:10px 12px;border:1px solid #2a2a2a;border-radius:10px;background:#111;'>"
-            "<b>Built with:</b> FastAPI • OpenEnv • Gradio • TRL/Unsloth • Hugging Face"
-            "</div>"
+        gr.Markdown("---")
+        
+        gr.Markdown("### Reinforcement Learning Pipeline")
+        with gr.Row():
+            with gr.Column(scale=1):
+                gr.Markdown("#### Training Logs (Live)")
+                train_log_output = gr.Code(language="shell", lines=20, label="GRPO Training stdout")
+            
+            with gr.Column(scale=1):
+                gr.Markdown("#### Rewards (Live)")
+                reward_plot = gr.LinePlot(
+                    x="episode",
+                    y="total_reward",
+                    title="Total Reward per Episode",
+                    tooltip=["episode", "task_id", "total_reward"]
+                )
+                episodes_table = gr.Dataframe(label="Recent Episodes", wrap=True, max_height=300)
+        
+        gr.Timer(3).tick(update_training_plots, outputs=[reward_plot, episodes_table])
+
+        gr.Markdown("---")
+        
+        gr.Markdown("### LLM Inference Performance")
+        btn_refresh_inference = gr.Button("🔄 Refresh Inference Metrics")
+        inference_kpis = gr.HTML()
+        inference_cm = gr.Dataframe(label="Confusion Matrix")
+        
+        # Hidden init loading
+        demo.load(parse_inference, outputs=[inference_kpis, inference_cm])
+        btn_refresh_inference.click(parse_inference, outputs=[inference_kpis, inference_cm])
+
+
+        # Wiring executions
+        btn_baseline.click(
+            fn=run_baseline_stream, 
+            outputs=[train_log_output]
+        ).then(parse_baseline, outputs=[baseline_kpis, baseline_cm])
+
+        btn_train.click(
+            fn=run_train_stream,
+            outputs=[train_log_output]
         )
 
-        episode_log_path = gr.Textbox(
-            label="Episode log file",
-            value="training/logs/episodes.jsonl",
-            interactive=False,
-        )
-        metrics_log_path = gr.Textbox(
-            label="Training metrics log file",
-            value="training/logs/grpo_metrics.jsonl",
-            interactive=False,
-        )
-        max_rows = gr.Slider(20, 1000, step=20, value=200, label="Rows to display", interactive=True)
-        refresh = gr.Button("Refresh Monitor")
-
-        kpis = gr.HTML(label="KPI Overview")
-        summary = gr.JSON(label="Run Summary")
-        latest_episode = gr.JSON(label="Latest Episode")
-        episodes_table = gr.Dataframe(label="Episode Timeline", wrap=True)
-        metrics_table = gr.Dataframe(label="Training Metrics", wrap=True)
-
-        with gr.Tab("Docs"):
-            gr.Markdown(
-                "- Swagger: `/docs`\n"
-                "- OpenAPI schema: `/openapi.json`\n"
-                "- OpenEnv tasks: `/tasks`\n"
-                "- This monitor is read-only."
-            )
-
-        refresh.click(
-            refresh_monitor,
-            inputs=[episode_log_path, metrics_log_path, max_rows],
-            outputs=[kpis, summary, latest_episode, episodes_table, metrics_table],
+        btn_inference.click(
+            fn=run_inference_sync,
+            outputs=[inference_kpis, inference_cm]
         )
 
-        timer = gr.Timer(5)
-        timer.tick(
-            refresh_monitor,
-            inputs=[episode_log_path, metrics_log_path, max_rows],
-            outputs=[kpis, summary, latest_episode, episodes_table, metrics_table],
-        )
     return demo
+
+
+if __name__ == "__main__":
+    demo = build_demo()
+    demo.launch(server_name="0.0.0.0", server_port=7860, share=False)

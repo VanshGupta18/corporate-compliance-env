@@ -23,7 +23,7 @@ tags:
 > corporate action requests against internal policy documents.
 
 [![OpenEnv Spec](https://img.shields.io/badge/OpenEnv-Compliant-blue)](https://openenv.dev)
-[![Python](https://img.shields.io/badge/Python-3.10+-green)](https://python.org)
+[![Python](https://img.shields.io/badge/Python-3.11+-green)](https://python.org)
 [![HuggingFace](https://img.shields.io/badge/HuggingFace-Space-orange)](https://huggingface.co/spaces/mcqueenmater/env-corporate)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
@@ -87,13 +87,13 @@ The agent can also:
 
 ## 🏆 Baseline Performance
 
-| Difficulty | Task | LLM Agent (Llama-3.1-8B) | Rule-Based Baseline |
+| Difficulty | Task | Post-RL target (GRPO) | Rule-based baseline |
 |---|---|---|---|
-| Easy | Single-step classification | ≥ 0.90* | 0.78 |
-| Medium | Policy retrieval | ≥ 0.80* | 0.61 |
-| Hard | Multi-turn contextual | ≥ 0.70* | 0.34 |
+| Easy | Single-step classification | 0.85–0.99 | ~0.78 |
+| Medium | Policy retrieval | 0.60–0.90 | ~0.61 |
+| Hard | Multi-turn contextual | 0.40–0.75 | ~0.34 |
 
-*LLM scores with step-aware prompting (deployed April 2026)
+Curriculum bands are defined in [`app/curriculum_targets.py`](app/curriculum_targets.py) and [`openenv.yaml`](openenv.yaml).
 
 ---
 
@@ -103,28 +103,41 @@ The agent can also:
 
 Visit the running instance: **https://huggingface.co/spaces/mcqueenmater/env-corporate**
 
-### Run Locally with Docker
+### Run locally
 
 ```bash
-# Clone and build
-git clone https://huggingface.co/spaces/mcqueenmater/env-corporate
+git clone https://github.com/VanshGupta18/corporate-compliance-env.git
 cd corporate-compliance-env
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+uvicorn app.server.app:app --host 0.0.0.0 --port 7860
+# API docs: http://localhost:7860/docs
+# Dashboard: http://localhost:7860/demo
+
+openenv validate --url http://localhost:7860 --verbose
+pytest tests/ -q
+```
+
+### Baseline and inference
+
+```bash
+python app/baseline.py          # writes baseline_results.json (gitignored)
+python inference.py             # writes inference_results.json (gitignored)
+```
+
+### Train on Google Colab (Unsloth SFT + GRPO)
+
+See **[`TRAINING.md`](TRAINING.md)** for the Colab-first pipeline: data prep, SFT warm-start, curriculum GRPO stages, and local eval (no WebSocket server required).
+
+### Docker
+
+```bash
 docker build -t compliance-env .
 docker run -p 7860:7860 compliance-env
-
-# Validate against OpenEnv spec
-openenv validate --url http://localhost:7860 --verbose
 ```
 
-### Run the LLM Inference Agent
-
-```bash
-export API_BASE_URL="https://router.huggingface.co/v1"
-export MODEL_NAME="meta-llama/Llama-3.1-8B-Instruct"
-export HF_TOKEN="your_huggingface_token"
-
-python inference.py
-```
+See [`Dockerfile`](Dockerfile) and [`openenv.yaml`](openenv.yaml) for container and OpenEnv metadata.
 
 ---
 
@@ -133,9 +146,10 @@ python inference.py
 | Endpoint | Method | Description |
 |---|---|---|
 | `/health` | GET | Server health check |
-| `/reset` | POST | Start a new episode • Body: `{"task_id": "easy\|medium\|hard"}` |
-| `/step` | POST | Submit an action • Body: `ComplianceAction` JSON |
-| `/state` | GET | Get current episode state |
+| `/ws` | WebSocket | **Primary OpenEnv episode API**. Use for stateful `reset` / `step` / `state` loops |
+| `/reset` | POST | Stateless reset smoke check • Body: `{"task_id": "easy\|medium\|hard"}` |
+| `/step` | POST | Stateless single action endpoint • Body: `{"action": ComplianceAction}`. Do not use for multi-step episodes |
+| `/state` | GET | Stateless state endpoint for debugging |
 | `/tasks` | GET | List all tasks + action schema |
 | `/grader` | POST | Get final score for completed episode |
 | `/baseline` | POST | Run baseline agent on all 3 tasks |
@@ -172,31 +186,27 @@ mirroring how a real compliance officer navigates incomplete files.
 ## 📦 Project Structure
 
 ```
-corporate-policy-compliance-env/
-│
+meta-openenv/
 ├── app/
-│   ├── __init__.py           # Exports for RL frameworks (env + client)
-│   ├── models.py             # All Pydantic schemas
-│   ├── client.py             # HTTPEnvClient subclass for remote usage
-│   ├── server/
-│   │   ├── environment.py    # ComplianceEnv class (reset/step/state)
-│   │   └── app.py            # FastAPI app + HF web interface wrapper
-│   ├── graders.py            # Deterministic grader for all 3 tasks
-│   └── baseline.py           # Baseline inference script (OpenAI API)
-│
+│   ├── models.py, client.py, graders.py, baseline.py, dashboard.py
+│   ├── curriculum_targets.py, policy_snippets.py
+│   └── server/               # ComplianceEnv + FastAPI app
+├── server/                   # OpenEnv entrypoint (re-exports app.server.app)
 ├── data/
-│   ├── policy.md             # 15-rule company policy document
-│   ├── claims.json           # 100 synthetic expense claims + ground truth
-│   └── generate_dataset.py   # Script to regenerate synthetic data
-│
-├── tests/
-│   └── test_graders.py       # Unit tests for all 3 graders
-│
-├── openenv.yaml              # OpenEnv metadata file
-├── Dockerfile                # Container spec (port 7860)
-├── requirements.txt          # Pinned dependencies
-└── README.md
+│   ├── policy.md, claims.json, splits/
+│   └── generate_dataset.py
+├── training/
+│   ├── prepare_data.py, sft_train.py, grpo_train.py, eval_checkpoint.py
+│   ├── learning_curve.py, smoke_test.py, training_utils.py
+│   └── requirements-training.txt
+├── tests/                    # API, graders, curriculum, training smoke
+├── scripts/                  # validate-submission.sh, validate_dataset.py
+├── inference.py
+├── openenv.yaml, Dockerfile, TRAINING.md
+└── requirements.txt
 ```
+
+Generated at runtime (gitignored): `baseline_results.json`, `inference_results.json`, `training/data/`, `training/logs/`, `training/checkpoints/`.
 
 ---
 
@@ -421,7 +431,7 @@ The agent's rulebook covers:
 14. GST receipt required for all claims above ₹5,000
 15. Personal shopping, gifts, and entertainment without client present — reject
 
-### `data/claims.json` — 100 Synthetic Claims
+### `data/claims.json` and `data/splits/` — Curriculum Claims
 
 ```json
 {
@@ -441,20 +451,27 @@ The agent's rulebook covers:
 }
 ```
 
-**Distribution:** 33 Easy / 33 Medium / 34 Hard (100 total claims)
-**Split:** 80 training / 20 held-out evaluation
+`ground_truth_*` fields are stored in datasets for graders and offline analysis only. They are not populated in agent observations.
+
+**Distribution:** balanced easy / medium / hard curriculum claims
+**Split:** explicit `train`, `validation`, and `test` JSON files under `data/splits/`
 
 ### `data/generate_dataset.py`
 
 Regenerate the full synthetic dataset at any time:
 
 ```bash
-python data/generate_dataset.py --count 100 --seed 42
+python data/generate_dataset.py \
+  --train-per-diff 120 --val-per-diff 40 --test-per-diff 40 --seed 42
 ```
 
-Parameters: `--count` (number of claims), `--seed` (reproducibility),
-`--output` (output path). The script uses rule templates + random
-sampling — no external API needed.
+Writes `data/claims.json` and `data/splits/{train,validation,test}.json`. Then build SFT rows:
+
+```bash
+python training/prepare_data.py --episodes-per-task 40 --split train
+```
+
+Manual QA report: `python scripts/validate_dataset.py` (run from repo root).
 
 ---
 
@@ -462,12 +479,15 @@ sampling — no external API needed.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/reset` | Start new episode. Body: `{"task_id": "easy\|medium\|hard"}` |
-| `POST` | `/step` | Take one action. Body: `ComplianceAction` JSON |
-| `GET` | `/state` | Get current episode state |
+| `WS` | `/ws` | Primary stateful OpenEnv session API. Use this for all multi-step episodes |
+| `POST` | `/reset` | Stateless reset smoke check. Body: `{"task_id": "easy\|medium\|hard"}` |
+| `POST` | `/step` | Stateless single action endpoint. Body: `{"action": ComplianceAction}` |
+| `GET` | `/state` | Stateless debugging endpoint |
 | `GET` | `/tasks` | List all tasks + full action schema |
 | `POST` | `/grader` | Get final score for completed episode |
 | `POST` | `/baseline` | Run baseline agent on all 3 tasks, return scores |
+
+OpenEnv creates a fresh environment for each HTTP request. Keep a WebSocket open through `ComplianceEnvClient(...).sync()` for normal `reset()` / `step()` loops.
 
 ### `/tasks` response
 
@@ -512,113 +532,6 @@ sampling — no external API needed.
 
 ---
 
-## 🚀 Quickstart
-
-### 1. Clone & Install
-
-```bash
-git clone https://github.com/your-repo/corporate-compliance-env
-cd corporate-compliance-env
-pip install -r requirements.txt
-```
-
-### 2. Run the Server
-
-```bash
-uvicorn app.server.app:app --host 0.0.0.0 --port 7860
-```
-
-Open:
-- API docs: `http://localhost:7860/docs`
-- Live dashboard: `http://localhost:7860/demo`
-
-### 3. Validate Against OpenEnv Spec
-
-```bash
-openenv validate --host http://localhost:7860
-```
-
-### 4. Run Baseline Inference
-
-```bash
-export OPENAI_API_KEY=your_key_here
-python app/baseline.py
-```
-
-Expected output:
-```
-Task 1 (Easy)   — Baseline Score: 0.78
-Task 2 (Medium) — Baseline Score: 0.61
-Task 3 (Hard)   — Baseline Score: 0.34
-Average Score:    0.577
-```
-
-### 5. Run Tests
-
-```bash
-pytest tests/test_graders.py -v
-pytest tests/test_api.py -v
-```
-
-### 6. Run via Docker
-
-```bash
-docker build -t compliance-env .
-docker run -p 7860:7860 compliance-env
-```
-
----
-
-## 🐳 Dockerfile
-
-```dockerfile
-FROM python:3.11-slim
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-EXPOSE 7860
-CMD ["uvicorn", "app.server.app:app", "--host", "0.0.0.0", "--port", "7860"]
-```
-
----
-
-## 📄 openenv.yaml
-
-```yaml
-name: corporate-policy-compliance-env
-version: "1.0.0"
-description: >
-  RL environment simulating enterprise corporate policy compliance.
-  An agent audits employee expense claims against a company rulebook
-  and decides to Approve, Reject, or Escalate each ticket.
-  Grounded in Indian corporate compliance norms (INR, GST, WFH policy).
-author: your-name
-domain: enterprise-compliance
-tags: [compliance, finance, hr, enterprise, india]
-reward_range: [-1.0, 1.0]
-tasks:
-  - id: easy
-    name: single_step_classification
-    difficulty: easy
-    max_steps: 3
-    baseline_score: 0.78
-  - id: medium
-    name: policy_retrieval
-    difficulty: medium
-    max_steps: 5
-    baseline_score: 0.61
-  - id: hard
-    name: multi_turn_contextual
-    difficulty: hard
-    max_steps: 8
-    baseline_score: 0.34
-action_space: ComplianceAction
-observation_space: ComplianceObservation
-```
-
----
-
 ## 📈 Why This Environment Matters
 
 Companies like Ramp, Concur, and SAP spend millions building
@@ -640,5 +553,10 @@ can handle ~70% of routine compliance decisions autonomously.
 
 ## 🧪 Training Pipeline (SFT + GRPO)
 
-For end-to-end model training and adapter publishing instructions, see [`TRAINING.md`](TRAINING.md).
+Colab runbook: [`TRAINING.md`](TRAINING.md). Quick checks:
 
+```bash
+python training/smoke_test.py
+python -m training.sft_train --dry-run
+python -m training.grpo_train --dry-run
+```

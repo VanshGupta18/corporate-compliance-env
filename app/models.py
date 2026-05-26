@@ -42,7 +42,7 @@ class ComplianceObservation(Observation):
     env_message: str
     step_count: int
     max_steps: int
-    ground_truth_decision: Optional[TicketDecision] = None  # Included only when episode is done
+    ground_truth_decision: Optional[TicketDecision] = None  # Internal/debug only; never populated for agents.
 
 class ComplianceState(State):
     task_id: Optional[str] = None
@@ -64,6 +64,7 @@ class TaskMetadata(BaseModel):
     max_steps: int
     expected_steps: Optional[str] = None
     difficulty: Optional[str] = None
+    curriculum: Optional[Dict[str, Any]] = None
 
 
 class TasksResponse(BaseModel):
