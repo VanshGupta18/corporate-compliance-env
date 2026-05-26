@@ -445,7 +445,7 @@ def main() -> None:
         else:
             print(
                 "WARN: TRL GRPOTrainer missing rollout_func — "
-                "install the Colab notebook stack with trl==0.24.0 before GPU training."
+                "install a TRL build with OpenEnv support before GPU training."
             )
         print("Dry run OK — dataset and curriculum wiring ready.")
         return
@@ -454,7 +454,7 @@ def main() -> None:
     if not grpo_supports_rollout_func():
         raise RuntimeError(
             "TRL GRPOTrainer does not accept rollout_func. "
-            "Install the Colab notebook stack with trl==0.24.0 before training."
+            "Install a TRL build with OpenEnv support before training."
         )
 
     from transformers import TrainerCallback

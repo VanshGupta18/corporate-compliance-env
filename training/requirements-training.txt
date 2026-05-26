@@ -8,14 +8,14 @@
 #   2. pip install -r training/requirements-training.txt
 #   3. pip uninstall -y torchcodec torchao sentence-transformers
 
-datasets>=3.4.1,<4.4.0
+datasets>=3.4.1
 requests>=2.32.0
 
-# Pulls compatible transformers / peft / accelerate / bitsandbytes / trl (<=0.24)
+# Pulls compatible transformers / peft / accelerate / bitsandbytes.
 unsloth==2026.4.6
 
-# Pin TRL for GRPO rollout_func + trl.experimental.openenv
-trl==0.24.0
+# OpenEnv rollouts live in TRL mainline.
+git+https://github.com/huggingface/trl.git
 
 # Do not add torchcodec / torchao / sentence-transformers here. They are optional
 # for this text-only run and frequently break imports on Colab's CUDA/PyTorch stack.

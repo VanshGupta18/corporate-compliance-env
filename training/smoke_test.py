@@ -91,7 +91,7 @@ def check_rollout_contract() -> None:
     if supported:
         _ok("TRL GRPOTrainer supports rollout_func")
     else:
-        print("  WARN TRL missing rollout_func — upgrade trl before GRPO on Colab")
+        print("  WARN TRL missing rollout_func — install TRL with OpenEnv support before GRPO")
 
 
 def check_script_dry_runs() -> None:

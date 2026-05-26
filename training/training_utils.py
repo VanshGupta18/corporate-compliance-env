@@ -130,6 +130,13 @@ def filter_dataset_by_curriculum(dataset, stage: str):
 def grpo_supports_rollout_func() -> bool:
     """Return True if installed TRL GRPOTrainer accepts rollout_func."""
     try:
+        from trl.experimental.openenv import generate_rollout_completions  # noqa: F401
+
+        return True
+    except Exception:
+        pass
+
+    try:
         from trl.trainer.grpo_trainer import GRPOTrainer
     except Exception:
         try:
@@ -137,7 +144,12 @@ def grpo_supports_rollout_func() -> bool:
         except Exception:
             return False
     try:
-        return "rollout_func" in inspect.signature(GRPOTrainer.__init__).parameters
+        sig = inspect.signature(GRPOTrainer.__init__)
+        params = sig.parameters
+        if "rollout_func" in params:
+            return True
+        # Some TRL builds accept rollout_func through **kwargs.
+        return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
     except Exception:
         return False
 
@@ -159,7 +171,8 @@ def require_rollout_dependencies(
     if not grpo_supports_rollout_func():
         raise RuntimeError(
             "Installed TRL GRPOTrainer does not support rollout_func. "
-            "Upgrade trl (pip install -U trl) for OpenEnv-style GRPO rollouts."
+            "Install a TRL build with OpenEnv support (recommended: "
+            "`pip install -U git+https://github.com/huggingface/trl.git`)."
         )
 
     if require_generate:
