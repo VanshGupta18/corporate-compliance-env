@@ -86,3 +86,37 @@ def test_sft_dataset_schema_if_present():
 def test_curriculum_stages_defined():
     assert "stage_1_easy" in CURRICULUM_STAGES
     assert "stage_3_hard" in CURRICULUM_STAGES
+
+
+def test_local_rollout_returns_batched_tutorial_contract(monkeypatch):
+    from training import grpo_train
+
+    def fake_generate_step(_trainer, _prompt):
+        return {
+            "prompt_ids": [1, 2],
+            "completion_ids": [3, 4],
+            "logprobs": [-0.1, -0.2],
+            "text": json.dumps(
+                {
+                    "action_type": "ResolveTicket",
+                    "decision": "Approve",
+                    "reason": "Smoke-test action.",
+                }
+            ),
+        }
+
+    monkeypatch.setattr(grpo_train, "_generate_step", fake_generate_step)
+    result = grpo_train.rollout_local(["Task: easy\nTicket: {}"], trainer=object(), task_ids=["easy"])
+
+    assert set(result) == {
+        "prompt_ids",
+        "completion_ids",
+        "logprobs",
+        "grader_score",
+        "env_reward",
+        "format_reward",
+    }
+    assert all(isinstance(value, list) and len(value) == 1 for value in result.values())
+    assert result["prompt_ids"][0] == [1, 2]
+    assert result["completion_ids"][0] == [3, 4]
+    assert result["format_reward"][0] == 0.10

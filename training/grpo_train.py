@@ -30,6 +30,17 @@ from training.training_utils import (
     resolve_precision,
 )
 
+COMPLIANCE_SYSTEM_PROMPT = """\
+You are an AI Compliance Officer. Audit employee expense claims against company policy.
+
+Use the available action JSON types:
+- SearchPolicy when policy details are hidden or unclear.
+- RequestInformation when a required document is missing.
+- ResolveTicket when you are ready to decide Approve, Reject, or Escalate.
+
+Return only one valid JSON action for the next step.
+"""
+
 try:
     from training.learning_curve import log_learning_point
 except ImportError:
@@ -78,6 +89,12 @@ def completion_to_text(completion: Any) -> str:
 
 def action_json_reward(completions, **kwargs) -> List[float]:
     """Small format reward; task quality comes from grader_reward."""
+    scores = kwargs.get("format_reward")
+    if scores is not None:
+        if len(scores) < len(completions):
+            scores = list(scores) + [scores[-1]] * (len(completions) - len(scores))
+        return [float(s) for s in scores[: len(completions)]]
+
     rewards = []
     for completion in completions:
         payload = parse_json_payload(completion_to_text(completion))
@@ -113,6 +130,65 @@ def _step_local_env(env: ComplianceEnv, text: str) -> tuple[float, bool, Dict[st
         return -0.5, True, {}
 
 
+def _trainer_tokenizer(trainer):
+    return (
+        getattr(trainer, "processing_class", None)
+        or getattr(trainer, "tokenizer", None)
+    )
+
+
+def _render_step_prompt(trainer, task_id: str, observation: Dict[str, Any]) -> str:
+    """Render the next-step prompt in the chat-template style used by the tutorial."""
+    user_prompt = build_step_prompt(task_id, observation)
+    tokenizer = _trainer_tokenizer(trainer)
+    messages = [
+        {"role": "system", "content": COMPLIANCE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
+        try:
+            return tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=False,
+                enable_thinking=False,
+            )
+        except TypeError:
+            return tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+    return f"{COMPLIANCE_SYSTEM_PROMPT}\n\n{user_prompt}\n"
+
+
+def _generated_text(trainer, generation: Dict[str, Any]) -> str:
+    text = generation.get("text")
+    if isinstance(text, str) and text.strip():
+        return text
+    completion = generation.get("completion")
+    if completion is not None:
+        return completion_to_text(completion)
+    completion_ids = generation.get("completion_ids")
+    tokenizer = _trainer_tokenizer(trainer)
+    if completion_ids and tokenizer is not None and hasattr(tokenizer, "decode"):
+        return tokenizer.decode(completion_ids, skip_special_tokens=True)
+    return completion_to_text(generation)
+
+
+def _batch_rollouts(episodes: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
+    """TRL rollout_func contract: return a dict of lists, not list of dicts."""
+    keys = (
+        "prompt_ids",
+        "completion_ids",
+        "logprobs",
+        "grader_score",
+        "env_reward",
+        "format_reward",
+    )
+    return {key: [episode[key] for episode in episodes] for key in keys}
+
+
 def _grade_local_env(env: ComplianceEnv, task_id: str) -> float:
     claim = getattr(env, "_current_claim", {}) or {}
     grader = grade_episode(
@@ -126,7 +202,7 @@ def _grade_local_env(env: ComplianceEnv, task_id: str) -> float:
 
 def _generate_step(trainer, step_prompt: str) -> Dict[str, Any]:
     try:
-        from trl.experimental.openenv import generate_rollout_completions
+        from trl.experimental.openenv import generate_rollout_completions  # type: ignore
     except ImportError as exc:
         raise RuntimeError(
             "generate_rollout_completions unavailable — upgrade trl for OpenEnv rollouts."
@@ -134,45 +210,58 @@ def _generate_step(trainer, step_prompt: str) -> Dict[str, Any]:
     return generate_rollout_completions(trainer, [step_prompt])[0]
 
 
-def rollout_local(prompts: List[str], trainer, task_ids: List[str]) -> List[Dict[str, Any]]:
-    """Multi-turn rollouts using in-process ComplianceEnv (default for Colab)."""
+def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
+    """Run one full ComplianceEnv episode using tutorial-style generation."""
     env = ComplianceEnv()
-    outputs: List[Dict[str, Any]] = []
+    env.reset(task_id=task_id, split="train")
+    all_prompt_ids: List[int] = []
+    all_completion_ids: List[int] = []
+    all_logprobs: List[float] = []
+    format_scores: List[float] = []
+    done = False
+    steps = 0
+    max_steps = env.task_max_steps.get(task_id, 8)
 
-    for _prompt, task_id in zip(prompts, task_ids):
-        env.reset(task_id=task_id, split="train")
-        all_prompt_ids: List[int] = []
-        all_completion_ids: List[int] = []
-        all_logprobs: List[float] = []
-        done = False
-        steps = 0
-        max_steps = env.task_max_steps.get(task_id, 8)
+    obs = env._get_observation().model_dump()
+    while not done and steps < max_steps:
+        steps += 1
+        step_prompt = _render_step_prompt(trainer, task_id, obs)
+        gen = _generate_step(trainer, step_prompt)
+        text = _generated_text(trainer, gen)
+        payload = parse_json_payload(text)
+        valid_action = payload and payload.get("action_type") in {
+            "SearchPolicy",
+            "RequestInformation",
+            "ResolveTicket",
+        }
+        format_scores.append(0.10 if valid_action else -0.10)
 
-        obs = env._get_observation().model_dump()
-        while not done and steps < max_steps:
-            steps += 1
-            step_prompt = build_step_prompt(task_id, obs)
-            gen = _generate_step(trainer, step_prompt)
-            text = completion_to_text(gen.get("completion", gen))
-            if gen.get("prompt_ids"):
-                all_prompt_ids.extend(gen["prompt_ids"])
-            if gen.get("completion_ids"):
-                all_completion_ids.extend(gen["completion_ids"])
-            if gen.get("logprobs"):
-                all_logprobs.extend(gen["logprobs"])
+        if gen.get("prompt_ids"):
+            all_prompt_ids.extend(gen["prompt_ids"])
+        if gen.get("completion_ids"):
+            all_completion_ids.extend(gen["completion_ids"])
+        if gen.get("logprobs"):
+            all_logprobs.extend(gen["logprobs"])
 
-            _reward, done, obs = _step_local_env(env, text)
+        _reward, done, obs = _step_local_env(env, text)
 
-        outputs.append(
-            {
-                "prompt_ids": all_prompt_ids or [0],
-                "completion_ids": all_completion_ids or [0],
-                "logprobs": all_logprobs or [0.0],
-                "grader_score": _grade_local_env(env, task_id),
-                "env_reward": env.state.cumulative_reward,
-            }
-        )
-    return outputs
+    return {
+        "prompt_ids": all_prompt_ids or [0],
+        "completion_ids": all_completion_ids or [0],
+        "logprobs": all_logprobs or [0.0],
+        "grader_score": _grade_local_env(env, task_id),
+        "env_reward": env.state.cumulative_reward,
+        "format_reward": format_scores[-1] if format_scores else -0.10,
+    }
+
+
+def rollout_local(prompts: List[str], trainer, task_ids: List[str]) -> Dict[str, List[Any]]:
+    """Multi-turn rollouts using in-process ComplianceEnv (default for Colab)."""
+    episodes = [
+        rollout_once_local(trainer, task_id)
+        for _prompt, task_id in zip(prompts, task_ids)
+    ]
+    return _batch_rollouts(episodes)
 
 
 def _load_claim_lookup() -> Dict[str, Dict[str, Any]]:
@@ -193,7 +282,7 @@ def rollout_remote(
     trainer,
     task_ids: List[str],
     api_url: str,
-) -> List[Dict[str, Any]]:
+) -> Dict[str, List[Any]]:
     if ComplianceEnvClient is None:
         raise RuntimeError("ComplianceEnvClient unavailable; use --use-local-env for Colab.")
 
@@ -216,9 +305,9 @@ def rollout_remote(
 
             while not done and steps < max_steps:
                 steps += 1
-                step_prompt = build_step_prompt(task_id, obs)
+                step_prompt = _render_step_prompt(trainer, task_id, obs)
                 gen = _generate_step(trainer, step_prompt)
-                text = completion_to_text(gen.get("completion", gen))
+                text = _generated_text(trainer, gen)
                 if gen.get("prompt_ids"):
                     all_prompt_ids.extend(gen["prompt_ids"])
                 if gen.get("completion_ids"):
@@ -247,13 +336,17 @@ def rollout_remote(
                     "completion_ids": all_completion_ids or [0],
                     "logprobs": all_logprobs or [0.0],
                     "grader_score": float(grader["score"]),
+                    "env_reward": sum(getattr(state, "rewards_history", []) or []),
+                    "format_reward": 0.10,
                 }
             )
-    return results
+    return _batch_rollouts(results)
 
 
 def make_rollout_func(use_local_env: bool, api_url: str):
-    def rollout_func(prompts: List[str], trainer) -> List[Dict[str, Any]]:
+    def rollout_func(prompts: List[str], trainer=None) -> Dict[str, List[Any]]:
+        if trainer is None:
+            raise RuntimeError("rollout_func requires the active GRPOTrainer instance.")
         task_ids = [extract_task_id(p) for p in prompts]
         if use_local_env:
             return rollout_local(prompts, trainer, task_ids)
@@ -292,13 +385,18 @@ def main() -> None:
     parser.add_argument("--use-local-env", action="store_true", default=True)
     parser.add_argument("--use-remote-env", action="store_true", help="Use WebSocket server at api-url")
     parser.add_argument("--max-seq-length", type=int, default=512)
+    parser.add_argument("--max-prompt-length", type=int, default=1400)
+    parser.add_argument("--max-completion-length", type=int, default=128)
     parser.add_argument("--num-generations", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=8)
     parser.add_argument("--learning-rate", type=float, default=5e-6)
     parser.add_argument("--max-train-steps", type=int, default=None)
+    parser.add_argument("--warmup-steps", type=int, default=20)
     parser.add_argument("--save-steps", type=int, default=100)
     parser.add_argument("--logging-steps", type=int, default=5)
+    parser.add_argument("--use-vllm", action="store_true", help="Enable TRL vLLM colocate mode.")
+    parser.add_argument("--vllm-gpu-memory-utilization", type=float, default=0.1)
     parser.add_argument("--log-file", default="training/logs/grpo_metrics.jsonl")
     parser.add_argument(
         "--learning-curve-file",
@@ -347,7 +445,7 @@ def main() -> None:
         else:
             print(
                 "WARN: TRL GRPOTrainer missing rollout_func — "
-                "pip install -U 'trl>=0.14.0' before GPU training."
+                "install the Colab notebook stack with trl==0.24.0 before GPU training."
             )
         print("Dry run OK — dataset and curriculum wiring ready.")
         return
@@ -356,7 +454,7 @@ def main() -> None:
     if not grpo_supports_rollout_func():
         raise RuntimeError(
             "TRL GRPOTrainer does not accept rollout_func. "
-            "pip install -U 'trl>=0.14.0' before Colab training."
+            "Install the Colab notebook stack with trl==0.24.0 before training."
         )
 
     from transformers import TrainerCallback
@@ -380,13 +478,25 @@ def main() -> None:
         per_device_train_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
         num_generations=args.num_generations,
-        max_completion_length=128,
+        max_prompt_length=args.max_prompt_length,
+        max_completion_length=args.max_completion_length,
+        warmup_steps=args.warmup_steps,
         bf16=use_bf16,
         fp16=use_fp16,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
+        gradient_checkpointing=True,
+        gradient_checkpointing_kwargs={"use_reentrant": False},
         report_to="none",
     )
+    if args.use_vllm:
+        config_kwargs.update(
+            {
+                "use_vllm": True,
+                "vllm_mode": "colocate",
+                "vllm_gpu_memory_utilization": args.vllm_gpu_memory_utilization,
+            }
+        )
     if args.max_train_steps is not None:
         config_kwargs["max_steps"] = args.max_train_steps
 

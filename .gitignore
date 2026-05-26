@@ -63,6 +63,7 @@ pip-wheel-metadata/
 # ── Jupyter / IPython ────────────────────────────────
 .ipynb_checkpoints/
 *.ipynb
+!notebooks/Colab_T4_Training.ipynb
 
 # ── Data files (keep claims.json, ignore generated) ──
 data/generated_*.json

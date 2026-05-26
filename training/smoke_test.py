@@ -113,7 +113,7 @@ def check_script_dry_runs() -> None:
     if proc.returncode != 0:
         # Older TRL installs may lack rollout_func or mergekit; curriculum path still validated.
         out = proc.stderr or proc.stdout
-        if "rollout_func" in out or "mergekit" in out or "Failed to import trl" in out:
+        if "rollout_func" in out or "Failed to import trl" in out:
             print(f"  WARN grpo_train dry-run skipped (TRL env): {out.strip()[:200]}")
         else:
             _fail(f"grpo_train dry-run:\n{out}")

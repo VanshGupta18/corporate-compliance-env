@@ -14,11 +14,14 @@ Default T4 settings: `max_seq_length=512`, `batch_size=1`, `grad_accum=8`, `num_
 !git clone https://github.com/YOUR_USER/meta-openenv.git
 %cd meta-openenv
 
-# Cell 2 — env runtime deps + pinned training deps (openenv-core is required for ComplianceEnv)
+# Cell 2 — env runtime deps, then Unsloth stack (avoid pinning torch/accelerate on Colab)
 !pip install -q -r requirements.txt
-!pip install -q -r training/requirements-training.txt
+!pip install -q "unsloth==2026.4.6"
+!pip install -q "trl==0.24.0" "datasets>=3.4.1,<4.4.0"
+# Runtime → Restart session (required — do not import unsloth in the same cell as pip)
 
-# Cell 3 — verify wiring (no GPU model load)
+# Cell 3 — verify stack + smoke test (after restart)
+# Run the notebook verify cell, then:
 !python training/smoke_test.py
 ```
 
