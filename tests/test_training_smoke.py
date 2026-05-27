@@ -13,8 +13,36 @@ from training.training_utils import (
     build_step_prompt,
     extract_task_id,
     filter_dataset_by_curriculum,
+    normalize_compliance_action,
     parse_json_payload,
+    parse_model_action,
 )
+
+
+def test_normalize_compliance_action_maps_notify_and_strips_observation_fields():
+    obs = {
+        "employee_name": "Arjun Nair",
+        "missing_document": "receipt",
+        "rule_keyword": "travel",
+        "step_count": 1,
+    }
+    raw = {
+        "action": "Notify Employee",
+        "employee_name": "Arjun Nair",
+        "employee_role": "Sales Executive",
+        "employee_level": "L4",
+        "risk_score": 0.34,
+    }
+    action = normalize_compliance_action(raw, obs)
+    assert action["action_type"] == "RequestInformation"
+    assert "employee_name" not in action
+    assert "receipt" in action["message"].lower()
+
+
+def test_parse_model_action_invalid_json_fallback():
+    action = parse_model_action("not json at all")
+    assert action["action_type"] == "ResolveTicket"
+    assert action["decision"] == "Reject"
 
 
 def test_parse_json_payload_extracts_object():

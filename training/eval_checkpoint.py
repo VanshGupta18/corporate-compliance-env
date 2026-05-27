@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 
@@ -19,7 +18,11 @@ import torch
 from app.graders import grade_episode
 from app.models import ComplianceAction
 from app.server.environment import ComplianceEnv
-from training.training_utils import build_step_prompt
+from training.training_utils import (
+    normalize_compliance_action,
+    parse_model_action,
+    render_compliance_prompt,
+)
 
 TASKS = ["easy", "medium", "hard"]
 
@@ -28,7 +31,11 @@ class EnvRunner(Protocol):
     def reset(self, task_id: str, claim_id: str | None = None) -> tuple[Dict[str, Any], bool]:
         ...
 
-    def step(self, action: Dict[str, Any]) -> tuple[Dict[str, Any], float, bool]:
+    def step(
+        self,
+        action: Dict[str, Any],
+        observation: Optional[Dict[str, Any]] = None,
+    ) -> tuple[Dict[str, Any], float, bool]:
         ...
 
     def actions_history(self) -> List[Dict[str, Any]]:
@@ -47,8 +54,13 @@ class LocalEnvRunner:
         obs = self.env._get_observation().model_dump()
         return obs, False
 
-    def step(self, action: Dict[str, Any]) -> tuple[Dict[str, Any], float, bool]:
-        result = self.env.step(ComplianceAction(**action))
+    def step(
+        self,
+        action: Dict[str, Any],
+        observation: Optional[Dict[str, Any]] = None,
+    ) -> tuple[Dict[str, Any], float, bool]:
+        payload = normalize_compliance_action(action, observation)
+        result = self.env.step(ComplianceAction(**payload))
         obs = result.model_dump()
         return obs, float(result.reward or 0.0), bool(result.done)
 
@@ -79,8 +91,13 @@ class WebSocketEnvRunner:
         self._claim = dict(self._claims_by_id.get(claim_id, {})) if claim_id else {}
         return obs, result.done
 
-    def step(self, action: Dict[str, Any]) -> tuple[Dict[str, Any], float, bool]:
-        result = self.client.step(ComplianceAction(**action))
+    def step(
+        self,
+        action: Dict[str, Any],
+        observation: Optional[Dict[str, Any]] = None,
+    ) -> tuple[Dict[str, Any], float, bool]:
+        payload = normalize_compliance_action(action, observation)
+        result = self.client.step(ComplianceAction(**payload))
         obs = result.observation.model_dump()
         return obs, float(result.reward or 0.0), result.done
 
@@ -94,24 +111,6 @@ class WebSocketEnvRunner:
 
     def close(self) -> None:
         self._client_ctx.__exit__(None, None, None)
-
-
-def parse_action(text: str) -> Dict[str, Any]:
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if not match:
-        return {
-            "action_type": "ResolveTicket",
-            "decision": "Reject",
-            "reason": "Parse error",
-        }
-    try:
-        return json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return {
-            "action_type": "ResolveTicket",
-            "decision": "Reject",
-            "reason": "Parse error",
-        }
 
 
 def load_model_and_tokenizer(checkpoint: str):
@@ -134,14 +133,28 @@ def load_model_and_tokenizer(checkpoint: str):
         return model, tokenizer
 
 
-def generate_action(model, tokenizer, prompt: str) -> Dict[str, Any]:
+def generate_action(
+    model,
+    tokenizer,
+    task_id: str,
+    observation: Dict[str, Any],
+) -> Dict[str, Any]:
+    prompt = render_compliance_prompt(tokenizer, task_id, observation)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    input_len = inputs["input_ids"].shape[1]
+    pad_id = tokenizer.pad_token_id
+    if pad_id is None:
+        pad_id = tokenizer.eos_token_id
     with torch.no_grad():
-        output = model.generate(**inputs, max_new_tokens=128, do_sample=False)
-    text = tokenizer.decode(output[0], skip_special_tokens=True)
-    if prompt in text:
-        text = text.split(prompt, 1)[-1]
-    return parse_action(text)
+        output = model.generate(
+            **inputs,
+            max_new_tokens=128,
+            do_sample=False,
+            pad_token_id=pad_id,
+        )
+    new_ids = output[0][input_len:]
+    text = tokenizer.decode(new_ids, skip_special_tokens=True)
+    return parse_model_action(text, observation)
 
 
 def run_episode(
@@ -159,9 +172,8 @@ def run_episode(
 
     while not done and steps < max_steps:
         steps += 1
-        prompt = build_step_prompt(task_id, observation)
-        action = generate_action(model, tokenizer, prompt)
-        observation, reward, done = runner.step(action)
+        action = generate_action(model, tokenizer, task_id, observation)
+        observation, reward, done = runner.step(action, observation)
         trajectory.append(
             {
                 "step": steps,

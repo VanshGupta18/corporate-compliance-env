@@ -23,6 +23,48 @@ CURRICULUM_STAGES: Dict[str, Dict[str, Any]] = {
 
 DEFAULT_LORA_TARGET = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
+COMPLIANCE_SYSTEM_PROMPT = """\
+You are an AI Compliance Officer. Audit employee expense claims against company policy.
+
+Use the available action JSON types:
+- SearchPolicy when policy details are hidden or unclear.
+- RequestInformation when a required document is missing.
+- ResolveTicket when you are ready to decide Approve, Reject, or Escalate.
+
+Return only one valid JSON action for the next step.
+"""
+
+VALID_ACTION_TYPES = frozenset(
+    {"SearchPolicy", "RequestInformation", "ResolveTicket"}
+)
+VALID_DECISIONS = frozenset({"Approve", "Reject", "Escalate"})
+_OBSERVATION_FIELD_NAMES = frozenset(
+    {
+        "ticket_id",
+        "employee_name",
+        "employee_role",
+        "employee_level",
+        "amount",
+        "currency",
+        "description",
+        "has_receipt",
+        "missing_document",
+        "rule_keyword",
+        "risk_score",
+        "env_message",
+        "step_count",
+        "max_steps",
+        "reward",
+        "done",
+        "ground_truth_decision",
+    }
+)
+_INVALID_ACTION_FALLBACK: Dict[str, Any] = {
+    "action_type": "ResolveTicket",
+    "decision": "Reject",
+    "reason": "Invalid action format",
+}
+
 
 def resolve_precision(precision: str) -> tuple[bool, bool]:
     import torch
@@ -38,6 +80,190 @@ def resolve_precision(precision: str) -> tuple[bool, bool]:
     if torch.cuda.is_available():
         return False, True
     return False, False
+
+
+def _infer_action_type(
+    raw: Dict[str, Any], observation: Optional[Dict[str, Any]] = None
+) -> str:
+    action_type = raw.get("action_type")
+    if isinstance(action_type, str) and action_type in VALID_ACTION_TYPES:
+        return action_type
+
+    if isinstance(action_type, str):
+        compact = action_type.lower().replace("_", "").replace(" ", "")
+        if "search" in compact or "policy" in compact:
+            return "SearchPolicy"
+        if "request" in compact or "information" in compact or "notify" in compact:
+            return "RequestInformation"
+        if "resolve" in compact or "ticket" in compact:
+            return "ResolveTicket"
+
+    action_label = str(raw.get("action") or "").lower()
+    if "search" in action_label or "policy" in action_label:
+        return "SearchPolicy"
+    if (
+        "request" in action_label
+        or "inform" in action_label
+        or "notify" in action_label
+    ):
+        return "RequestInformation"
+    if (
+        "resolve" in action_label
+        or "approve" in action_label
+        or "reject" in action_label
+        or "escalate" in action_label
+    ):
+        return "ResolveTicket"
+    if raw.get("query"):
+        return "SearchPolicy"
+    if raw.get("message"):
+        return "RequestInformation"
+    if raw.get("decision"):
+        return "ResolveTicket"
+    if observation and observation.get("missing_document"):
+        return "RequestInformation"
+    if observation and int(observation.get("step_count", 1) or 1) <= 2:
+        return "SearchPolicy"
+    return "ResolveTicket"
+
+
+def normalize_compliance_action(
+    raw: Any,
+    observation: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Map model output (often observation-shaped) into a valid ComplianceAction dict."""
+    from app.models import ComplianceAction
+
+    if not isinstance(raw, dict):
+        return dict(_INVALID_ACTION_FALLBACK)
+
+    cleaned = {
+        k: v
+        for k, v in raw.items()
+        if k not in _OBSERVATION_FIELD_NAMES and k != "action"
+    }
+    action_type = _infer_action_type(raw, observation)
+
+    normalized: Dict[str, Any] = {"action_type": action_type}
+    if action_type == "SearchPolicy":
+        query = cleaned.get("query") or raw.get("query")
+        if not query and observation:
+            query = observation.get("rule_keyword") or "policy"
+        normalized["query"] = str(query or "policy")[:500]
+    elif action_type == "RequestInformation":
+        message = cleaned.get("message") or raw.get("message")
+        if not message:
+            action_label = str(raw.get("action") or "")
+            label_low = action_label.lower()
+            if action_label and not any(
+                token in label_low
+                for token in ("notify", "request", "inform", "employee")
+            ):
+                message = action_label
+        if (not message or not str(message).strip()) and observation:
+            missing = observation.get("missing_document")
+            if missing:
+                doc = str(missing).replace("_", " ")
+                message = f"Please provide {doc}"
+        normalized["message"] = str(message or "Please provide the required document.")[
+            :500
+        ]
+    else:
+        decision = cleaned.get("decision") or raw.get("decision")
+        if isinstance(decision, str):
+            title = decision.strip().title()
+            normalized["decision"] = (
+                title if title in VALID_DECISIONS else "Escalate"
+            )
+        else:
+            normalized["decision"] = "Escalate"
+        normalized["reason"] = str(
+            cleaned.get("reason") or raw.get("reason") or "Model decision"
+        )[:500]
+
+    metadata = cleaned.get("metadata")
+    if isinstance(metadata, dict):
+        normalized["metadata"] = metadata
+
+    try:
+        return ComplianceAction.model_validate(normalized).model_dump()
+    except Exception:
+        return dict(_INVALID_ACTION_FALLBACK)
+
+
+def parse_model_action(
+    text: str, observation: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Parse generation text into a validated ComplianceAction dict."""
+    payload = parse_json_payload(text)
+    if payload:
+        return normalize_compliance_action(payload, observation)
+
+    if "SearchPolicy" in text:
+        query_match = re.search(r'query["\']?\s*[:\-]?\s*["\']([^"\']+)["\']', text)
+        return normalize_compliance_action(
+            {
+                "action_type": "SearchPolicy",
+                "query": query_match.group(1) if query_match else "policy",
+            },
+            observation,
+        )
+    if "RequestInformation" in text:
+        msg_match = re.search(r'message["\']?\s*[:\-]?\s*["\']([^"\']+)["\']', text)
+        return normalize_compliance_action(
+            {
+                "action_type": "RequestInformation",
+                "message": msg_match.group(1)
+                if msg_match
+                else "Please provide missing information",
+            },
+            observation,
+        )
+    if "ResolveTicket" in text:
+        decision = "Reject"
+        if "Approve" in text:
+            decision = "Approve"
+        elif "Escalate" in text:
+            decision = "Escalate"
+        reason_match = re.search(r'reason["\']?\s*[:\-]?\s*["\']([^"\']+)["\']', text)
+        return normalize_compliance_action(
+            {
+                "action_type": "ResolveTicket",
+                "decision": decision,
+                "reason": reason_match.group(1) if reason_match else "Based on policy review",
+            },
+            observation,
+        )
+
+    return dict(_INVALID_ACTION_FALLBACK)
+
+
+def render_compliance_prompt(
+    tokenizer: Any,
+    task_id: str,
+    observation: Dict[str, Any],
+) -> str:
+    """Render chat-template prompt aligned with GRPO training."""
+    user_prompt = build_step_prompt(task_id, observation)
+    messages = [
+        {"role": "system", "content": COMPLIANCE_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt},
+    ]
+    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
+        try:
+            return tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=False,
+                enable_thinking=False,
+            )
+        except TypeError:
+            return tokenizer.apply_chat_template(
+                messages,
+                add_generation_prompt=True,
+                tokenize=False,
+            )
+    return f"{COMPLIANCE_SYSTEM_PROMPT}\n\n{user_prompt}\n"
 
 
 def parse_json_payload(text: str) -> Optional[Dict[str, Any]]:

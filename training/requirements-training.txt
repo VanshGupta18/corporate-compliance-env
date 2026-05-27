@@ -3,10 +3,8 @@
 # Do NOT pin torch or xformers here.
 # Colab ships CUDA-matched torch; keep the rest aligned for Unsloth + TRL GRPO.
 #
-# Install order (see notebooks/Colab_T4_Training.ipynb):
-#   1. pip install -r requirements.txt
-#   2. pip install -r training/requirements-training.txt
-#   3. pip uninstall -y torchcodec torchao sentence-transformers
+# Local/dev reference only. Colab installs inline pins in notebooks/Colab_T4_Training.ipynb.
+# Do not use this file in Colab with a single `pip install -r` — install step-by-step in the notebook.
 
 datasets>=3.4.1,<4.4.0,!=4.0.*,!=4.1.0
 requests>=2.32.0
