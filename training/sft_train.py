@@ -10,6 +10,11 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+try:
+    import unsloth  # noqa: F401  # must import before trl for Unsloth patches
+except ImportError:
+    pass
+
 from datasets import load_dataset
 from trl import SFTConfig, SFTTrainer
 
@@ -84,7 +89,7 @@ def main() -> None:
         save_steps=200,
         save_total_limit=2,
         report_to="none",
-        max_seq_length=args.max_length,
+        max_length=args.max_length,
         dataset_text_field="text",
         packing=False,
     )
