@@ -88,23 +88,30 @@ def grade_medium(
 ) -> Dict[str, Any]:
     claim = claim or {}
     rule_keyword = claim.get("rule_keyword", "")
+    required_document = claim.get("missing_document") or claim.get("required_document")
+    doc_required = bool(required_document)
     components = {
         "useful_search": 0.0,
+        "correct_document_request": 0.0,
         "correct_decision": 0.0,
         "valid_reason": 0.0,
         "minimal_steps": 0.0,
     }
 
     useful_search = _useful_search(actions_history, rule_keyword)
+    doc_ok = _correct_document_request(actions_history, required_document)
     final = _final_resolve(actions_history)
     correct_decision = bool(final and _decision_matches(final.get("decision"), ground_truth_decision))
 
     if useful_search:
-        components["useful_search"] = 0.35
+        components["useful_search"] = 0.30 if doc_required else 0.35
+    if doc_required and doc_ok:
+        components["correct_document_request"] = 0.15
 
     if final:
-        if correct_decision and useful_search:
-            components["correct_decision"] = 0.45
+        workflow_ok = useful_search and (doc_ok if doc_required else True)
+        if correct_decision and workflow_ok:
+            components["correct_decision"] = 0.35 if doc_required else 0.45
         if final.get("reason") and len(str(final.get("reason", ""))) >= 8:
             components["valid_reason"] = 0.10
 
@@ -112,7 +119,7 @@ def grade_medium(
         components["minimal_steps"] = 0.10
 
     score = sum(components.values())
-    if correct_decision and not useful_search:
+    if correct_decision and not (useful_search and (doc_ok if doc_required else True)):
         score = min(score, 0.45)
     elif not correct_decision:
         score = min(score, 0.35)

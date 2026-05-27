@@ -13,6 +13,7 @@ from training.training_utils import (
     build_step_prompt,
     extract_task_id,
     filter_dataset_by_curriculum,
+    infer_required_document,
     normalize_compliance_action,
     parse_json_payload,
     parse_model_action,
@@ -43,6 +44,19 @@ def test_parse_model_action_invalid_json_fallback():
     action = parse_model_action("not json at all")
     assert action["action_type"] == "ResolveTicket"
     assert action["decision"] == "Reject"
+
+
+def test_normalize_compliance_action_infers_required_doc_type():
+    obs = {
+        "missing_document": "required",
+        "description": "Vendor software license renewal",
+        "rule_keyword": "gst",
+        "amount": 12000,
+    }
+    action = normalize_compliance_action({"action_type": "RequestInformation"}, obs)
+    assert action["action_type"] == "RequestInformation"
+    assert "gst_invoice" in action["message"]
+    assert infer_required_document(obs) == "gst_invoice"
 
 
 def test_parse_json_payload_extracts_object():
@@ -143,8 +157,10 @@ def test_local_rollout_returns_batched_tutorial_contract(monkeypatch):
         "grader_score",
         "env_reward",
         "format_reward",
+        "loop_penalty",
+        "unresolved_penalty",
     }
     assert all(isinstance(value, list) and len(value) == 1 for value in result.values())
     assert result["prompt_ids"][0] == [1, 2]
     assert result["completion_ids"][0] == [3, 4]
-    assert result["format_reward"][0] == 0.10
+    assert result["format_reward"][0] == 0.05

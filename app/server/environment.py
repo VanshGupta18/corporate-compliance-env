@@ -30,7 +30,9 @@ class ComplianceEnv(Environment):
         self._policy_revealed = False
         self._useful_search = False
         self._ever_useful_search = False
-        self._document_received = False
+        self._document_requested = False
+        self._document_satisfied = False
+        self._last_requested_document = None
         self._env_message = ""
 
     def _load_claims(self):
@@ -79,7 +81,9 @@ class ComplianceEnv(Environment):
         self._policy_revealed = False
         self._useful_search = False
         self._ever_useful_search = False
-        self._document_received = False
+        self._document_requested = False
+        self._document_satisfied = False
+        self._last_requested_document = None
         self._env_message = ""
 
         self._state = ComplianceState(
@@ -165,18 +169,31 @@ class ComplianceEnv(Environment):
                 if not required:
                     reward = -0.2
                     self._env_message = "No missing document on this ticket."
+                elif self._document_satisfied:
+                    reward = -0.2
+                    self._env_message = (
+                        "Required document already received. Resolve the ticket now."
+                    )
                 elif (
                     required in msg
                     or required.replace("_", " ") in msg
                     or required.replace("_", "") in msg.replace("_", "").replace(" ", "")
                 ):
-                    self._document_received = True
+                    duplicate = (
+                        self._document_requested
+                        and self._last_requested_document == required
+                    )
+                    self._document_requested = True
+                    self._last_requested_document = required
                     doc_type = required
                     self._env_message = document_simulation(doc_type, claim)
                     if claim.get("document_outcome") == "provided":
+                        self._document_satisfied = True
                         claim["missing_document"] = None
                         claim["_document_cleared"] = True
-                    reward = 0.15
+                        reward = -0.05 if duplicate else 0.2
+                    else:
+                        reward = -0.2 if duplicate else 0.05
                 else:
                     reward = -0.1
                     self._env_message = (
@@ -198,7 +215,19 @@ class ComplianceEnv(Environment):
 
             if task_id == "hard":
                 required = claim.get("missing_document") or claim.get("required_document")
-                if required and not self._document_received:
+                if required and not self._document_requested:
+                    reward -= 0.15
+                if (
+                    required
+                    and claim.get("document_outcome") == "provided"
+                    and not self._document_satisfied
+                ):
+                    reward -= 0.3
+                if (
+                    required
+                    and claim.get("document_outcome") == "not_provided"
+                    and str(action.decision) == "Approve"
+                ):
                     reward -= 0.3
                 if not self._has_searched_policy():
                     reward -= 0.15
@@ -231,7 +260,7 @@ class ComplianceEnv(Environment):
         md = claim.get("missing_document") or claim.get("required_document")
         if task_id == "easy":
             return claim.get("missing_document")
-        if self._document_received or claim.get("_document_cleared"):
+        if self._document_satisfied or claim.get("_document_cleared"):
             return None
         if task_id in ("medium", "hard") and md:
             return "required"  # hide exact type until requested

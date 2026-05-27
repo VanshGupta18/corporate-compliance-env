@@ -30,6 +30,8 @@ Use the available action JSON types:
 - SearchPolicy when policy details are hidden or unclear.
 - RequestInformation when a required document is missing.
 - ResolveTicket when you are ready to decide Approve, Reject, or Escalate.
+- If missing_document is "required", infer the likely concrete document type
+  (manager_approval, gst_invoice, vp_approval, or utility_bill) before requesting it.
 
 Return only one valid JSON action for the next step.
 """
@@ -120,11 +122,31 @@ def _infer_action_type(
         return "RequestInformation"
     if raw.get("decision"):
         return "ResolveTicket"
-    if observation and observation.get("missing_document"):
-        return "RequestInformation"
+    if observation:
+        max_steps = int(observation.get("max_steps", 8) or 8)
+        step_count = int(observation.get("step_count", 1) or 1)
+        if step_count >= max_steps - 1:
+            return "ResolveTicket"
+        if observation.get("rule_keyword") == "hidden":
+            return "SearchPolicy"
     if observation and int(observation.get("step_count", 1) or 1) <= 2:
         return "SearchPolicy"
     return "ResolveTicket"
+
+
+def infer_required_document(observation: Optional[Dict[str, Any]]) -> str:
+    if not observation:
+        return "manager_approval"
+    rule_keyword = str(observation.get("rule_keyword") or "").lower()
+    description = str(observation.get("description") or "").lower()
+    text = f"{rule_keyword} {description}"
+    if "international" in text or "vp" in text:
+        return "vp_approval"
+    if "gst" in text or float(observation.get("amount", 0) or 0) > 5000:
+        return "gst_invoice"
+    if "wfh" in text or "internet" in text or "electricity" in text:
+        return "utility_bill"
+    return "manager_approval"
 
 
 def normalize_compliance_action(
@@ -163,7 +185,10 @@ def normalize_compliance_action(
         if (not message or not str(message).strip()) and observation:
             missing = observation.get("missing_document")
             if missing:
-                doc = str(missing).replace("_", " ")
+                if str(missing).lower() == "required":
+                    doc = infer_required_document(observation)
+                else:
+                    doc = str(missing).replace("_", " ")
                 message = f"Please provide {doc}"
         normalized["message"] = str(message or "Please provide the required document.")[
             :500
@@ -173,10 +198,10 @@ def normalize_compliance_action(
         if isinstance(decision, str):
             title = decision.strip().title()
             normalized["decision"] = (
-                title if title in VALID_DECISIONS else "Escalate"
+                title if title in VALID_DECISIONS else "Reject"
             )
         else:
-            normalized["decision"] = "Escalate"
+            normalized["decision"] = "Reject"
         normalized["reason"] = str(
             cleaned.get("reason") or raw.get("reason") or "Model decision"
         )[:500]
@@ -311,10 +336,22 @@ def build_step_prompt(task_id: str, observation: Dict[str, Any]) -> str:
         )
         if k in observation
     }
+    extra = ""
+    missing = clean.get("missing_document")
+    step_count = int(clean.get("step_count", 1) or 1)
+    max_steps = int(clean.get("max_steps", 8) or 8)
+    if missing == "required":
+        extra += (
+            "\nThe ticket requires a document. Request the specific document type, "
+            "not the word 'required'."
+        )
+    if step_count >= max_steps - 1:
+        extra += "\nYou are near max steps; resolve now unless a required document is still pending."
     return (
         "You are an AI compliance officer. Return only valid action JSON.\n"
         f"Task: {task_id}\n"
         f"Ticket: {json.dumps(clean, ensure_ascii=True)}"
+        f"{extra}"
     )
 
 

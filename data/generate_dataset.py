@@ -28,7 +28,7 @@ CLIENTS = ["ABC Corp", "Innovate LLC", "Solutions Inc."]
 
 def get_ground_truth(claim: Dict[str, Any]) -> Tuple[str, str]:
     amount = claim["amount"]
-    desc = claim.get("description", "").lower()
+    desc = (claim.get("description") or claim.get("vague_description") or "").lower()
     level = claim.get("employee_level", "L3")
 
     if claim.get("force_decision"):
@@ -222,6 +222,7 @@ def generate_hard_claim(cid: int, scenario: str | None = None) -> Dict[str, Any]
         c["has_receipt"] = True
     elif sc == "doc_missing_reject":
         c["amount"] = random.randint(2800, 4500)
+        c["description"] = "Team celebration dinner over policy cap"
         c["vague_description"] = "Team celebration dinner"
         c["missing_document"] = "manager_approval"
         c["required_document"] = "manager_approval"

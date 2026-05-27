@@ -66,6 +66,25 @@ def test_medium_requires_useful_search():
     assert r2["components"]["useful_search"] > 0
 
 
+def test_medium_scores_document_request_when_required():
+    claim = {"rule_keyword": "daytime cab", "required_document": "manager_approval"}
+    actions = [
+        {"action_type": "SearchPolicy", "query": "daytime cab manager approval"},
+        {
+            "action_type": "RequestInformation",
+            "message": "Please provide manager_approval",
+        },
+        {
+            "action_type": "ResolveTicket",
+            "decision": "Reject",
+            "reason": "Missing manager approval for daytime cab.",
+        },
+    ]
+    r = grade_medium(actions, "Reject", claim)
+    assert r["components"]["correct_document_request"] > 0
+    assert r["score"] >= 0.7
+
+
 def test_medium_correct_guess_without_search_is_capped():
     claim = {"rule_keyword": "daytime cab"}
     actions = [

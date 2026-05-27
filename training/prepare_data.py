@@ -176,10 +176,47 @@ def to_sft_format(records: List[StepRecord], terminal_only: bool = False) -> Lis
     return rows
 
 
+def _response_payload(row: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        payload = json.loads(row.get("response", "{}"))
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
+def _rebalance_terminal_decisions(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    by_decision: Dict[str, List[Dict[str, Any]]] = {
+        "Approve": [],
+        "Reject": [],
+        "Escalate": [],
+    }
+    for row in rows:
+        payload = _response_payload(row)
+        if payload.get("action_type") != "ResolveTicket":
+            continue
+        decision = str(payload.get("decision") or "")
+        if decision in by_decision:
+            by_decision[decision].append(row)
+
+    non_escalate_target = max(len(by_decision["Approve"]), len(by_decision["Reject"]), 1)
+    balanced: List[Dict[str, Any]] = []
+    for decision in ("Approve", "Reject"):
+        bucket = by_decision[decision]
+        if not bucket:
+            continue
+        while len(bucket) < non_escalate_target:
+            bucket.append(random.choice(bucket))
+        balanced.extend(bucket)
+    escalate_bucket = by_decision["Escalate"][:non_escalate_target]
+    balanced.extend(escalate_bucket)
+    random.shuffle(balanced)
+    return balanced
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate curriculum trajectories.")
     parser.add_argument("--episodes-per-task", type=int, default=40)
-    parser.add_argument("--random-ratio", type=float, default=0.2)
+    parser.add_argument("--random-ratio", type=float, default=0.05)
     parser.add_argument("--output-dir", default="training/data")
     parser.add_argument("--split", default="train", help="claims split: train|validation|test")
     args = parser.parse_args()
@@ -209,7 +246,13 @@ def main() -> None:
     )
 
     sft_rows = to_sft_format(all_records, terminal_only=False)
-    positive = [r for r in sft_rows if r.get("reward", 0) > 0.5]
+    positive = []
+    for row in sft_rows:
+        payload = _response_payload(row)
+        is_terminal = payload.get("action_type") == "ResolveTicket"
+        if row.get("strategy") == "heuristic" and is_terminal and row.get("done"):
+            positive.append(row)
+    balanced = _rebalance_terminal_decisions(positive)
     (out_dir / "sft_dataset.jsonl").write_text(
         "\n".join(json.dumps(row, ensure_ascii=True) for row in sft_rows),
         encoding="utf-8",
@@ -218,7 +261,14 @@ def main() -> None:
         "\n".join(json.dumps(row, ensure_ascii=True) for row in positive),
         encoding="utf-8",
     )
-    print(f"Wrote {len(all_records)} steps, {len(positive)} positive SFT rows to {out_dir}")
+    (out_dir / "sft_dataset_balanced.jsonl").write_text(
+        "\n".join(json.dumps(row, ensure_ascii=True) for row in balanced),
+        encoding="utf-8",
+    )
+    print(
+        f"Wrote {len(all_records)} steps, {len(positive)} positive rows, "
+        f"{len(balanced)} balanced terminal rows to {out_dir}"
+    )
 
 
 if __name__ == "__main__":

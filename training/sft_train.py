@@ -27,7 +27,7 @@ def main() -> None:
         default="unsloth/Qwen2.5-3B-Instruct-bnb-4bit",
         help="Base model (4-bit recommended for Colab T4).",
     )
-    parser.add_argument("--dataset-path", default="training/data/sft_dataset.jsonl")
+    parser.add_argument("--dataset-path", default="training/data/sft_dataset_balanced.jsonl")
     parser.add_argument("--output-dir", default="training/checkpoints/sft")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=1)

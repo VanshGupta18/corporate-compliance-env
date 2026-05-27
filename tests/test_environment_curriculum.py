@@ -99,3 +99,33 @@ def test_hard_document_request_clears_missing(env):
         or "not provided" in msg
         or "missing" in msg
     )
+    if claim.get("document_outcome") == "provided":
+        assert obs.missing_document is None
+    else:
+        assert obs.missing_document == "required"
+
+
+def test_hard_duplicate_request_is_penalized(env):
+    claim = next(
+        c
+        for c in env.claims
+        if c.get("task_difficulty") == "hard"
+        and c.get("document_outcome") == "not_provided"
+        and (c.get("required_document") or c.get("missing_document"))
+    )
+    env.reset(task_id="hard", claim_id=claim["id"])
+    req = claim.get("missing_document") or claim.get("required_document")
+    first = env.step(
+        ComplianceAction(
+            action_type=ActionType.REQUEST_INFORMATION,
+            message=f"Please provide {req}",
+        )
+    )
+    second = env.step(
+        ComplianceAction(
+            action_type=ActionType.REQUEST_INFORMATION,
+            message=f"Please provide {req}",
+        )
+    )
+    assert first.reward is not None and second.reward is not None
+    assert second.reward < first.reward

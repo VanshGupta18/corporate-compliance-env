@@ -20,28 +20,18 @@ from app.server.environment import ComplianceEnv
 
 from training.training_utils import (
     CURRICULUM_STAGES,
-    build_step_prompt,
     extract_task_id,
     filter_dataset_by_curriculum,
     grpo_supports_rollout_func,
     load_unsloth_model,
     native_grpo_supports_rollout_func,
     parse_json_payload,
+    parse_model_action,
     require_rollout_dependencies,
+    render_compliance_prompt,
     resolve_grpo_trainer,
     resolve_precision,
 )
-
-COMPLIANCE_SYSTEM_PROMPT = """\
-You are an AI Compliance Officer. Audit employee expense claims against company policy.
-
-Use the available action JSON types:
-- SearchPolicy when policy details are hidden or unclear.
-- RequestInformation when a required document is missing.
-- ResolveTicket when you are ready to decide Approve, Reject, or Escalate.
-
-Return only one valid JSON action for the next step.
-"""
 
 try:
     from training.learning_curve import log_learning_point
@@ -118,13 +108,31 @@ def grader_reward(completions, **kwargs) -> List[float]:
         )
     if len(scores) < len(completions):
         scores = list(scores) + [scores[-1]] * (len(completions) - len(scores))
-    return [float(s) for s in scores[: len(completions)]]
+    loop_penalties = kwargs.get("loop_penalty", [0.0] * len(scores))
+    unresolved_penalties = kwargs.get("unresolved_penalty", [0.0] * len(scores))
+    if len(loop_penalties) < len(completions):
+        loop_penalties = list(loop_penalties) + [loop_penalties[-1]] * (
+            len(completions) - len(loop_penalties)
+        )
+    if len(unresolved_penalties) < len(completions):
+        unresolved_penalties = list(unresolved_penalties) + [unresolved_penalties[-1]] * (
+            len(completions) - len(unresolved_penalties)
+        )
+    combined: List[float] = []
+    for i in range(len(completions)):
+        score = (
+            float(scores[i]) + float(loop_penalties[i]) + float(unresolved_penalties[i])
+        )
+        combined.append(max(-1.0, min(1.0, score)))
+    return combined
 
 
-def _step_local_env(env: ComplianceEnv, text: str) -> tuple[float, bool, Dict[str, Any]]:
-    payload = parse_json_payload(text)
-    if not payload:
-        return -0.5, True, {}
+def _step_local_env(
+    env: ComplianceEnv,
+    text: str,
+    observation: Dict[str, Any],
+) -> tuple[float, bool, Dict[str, Any]]:
+    payload = parse_model_action(text, observation)
     try:
         obs = env.step(ComplianceAction(**payload))
         return float(obs.reward or 0.0), bool(obs.done), obs.model_dump()
@@ -141,27 +149,7 @@ def _trainer_tokenizer(trainer):
 
 def _render_step_prompt(trainer, task_id: str, observation: Dict[str, Any]) -> str:
     """Render the next-step prompt in the chat-template style used by the tutorial."""
-    user_prompt = build_step_prompt(task_id, observation)
-    tokenizer = _trainer_tokenizer(trainer)
-    messages = [
-        {"role": "system", "content": COMPLIANCE_SYSTEM_PROMPT},
-        {"role": "user", "content": user_prompt},
-    ]
-    if tokenizer is not None and hasattr(tokenizer, "apply_chat_template"):
-        try:
-            return tokenizer.apply_chat_template(
-                messages,
-                add_generation_prompt=True,
-                tokenize=False,
-                enable_thinking=False,
-            )
-        except TypeError:
-            return tokenizer.apply_chat_template(
-                messages,
-                add_generation_prompt=True,
-                tokenize=False,
-            )
-    return f"{COMPLIANCE_SYSTEM_PROMPT}\n\n{user_prompt}\n"
+    return render_compliance_prompt(_trainer_tokenizer(trainer), task_id, observation)
 
 
 def _generated_text(trainer, generation: Dict[str, Any]) -> str:
@@ -187,6 +175,8 @@ def _batch_rollouts(episodes: List[Dict[str, Any]]) -> Dict[str, List[Any]]:
         "grader_score",
         "env_reward",
         "format_reward",
+        "loop_penalty",
+        "unresolved_penalty",
     )
     return {key: [episode[key] for episode in episodes] for key in keys}
 
@@ -216,6 +206,7 @@ def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
     all_completion_ids: List[int] = []
     all_logprobs: List[float] = []
     format_scores: List[float] = []
+    raw_json_valid = True
     done = False
     steps = 0
     max_steps = env.task_max_steps.get(task_id, 8)
@@ -232,6 +223,7 @@ def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
             "RequestInformation",
             "ResolveTicket",
         }
+        raw_json_valid = raw_json_valid and bool(valid_action)
         format_scores.append(0.10 if valid_action else -0.10)
 
         if gen.get("prompt_ids"):
@@ -241,7 +233,13 @@ def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
         if gen.get("logprobs"):
             all_logprobs.extend(gen["logprobs"])
 
-        _reward, done, obs = _step_local_env(env, text)
+        _reward, done, obs = _step_local_env(env, text, obs)
+
+    actions = env.state.actions_history
+    request_count = sum(1 for action in actions if action.get("action_type") == "RequestInformation")
+    resolve_count = sum(1 for action in actions if action.get("action_type") == "ResolveTicket")
+    loop_penalty = -0.15 * max(0, request_count - 1)
+    unresolved_penalty = -0.25 if resolve_count == 0 else 0.0
 
     return {
         "prompt_ids": all_prompt_ids or [0],
@@ -249,7 +247,9 @@ def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
         "logprobs": all_logprobs or [0.0],
         "grader_score": _grade_local_env(env, task_id),
         "env_reward": env.state.cumulative_reward,
-        "format_reward": format_scores[-1] if format_scores else -0.10,
+        "format_reward": 0.05 if (raw_json_valid and resolve_count > 0) else -0.15,
+        "loop_penalty": loop_penalty,
+        "unresolved_penalty": unresolved_penalty,
     }
 
 
@@ -297,6 +297,7 @@ def rollout_remote(
             all_prompt_ids: List[int] = []
             all_completion_ids: List[int] = []
             all_logprobs: List[float] = []
+            raw_json_valid = True
             done = reset_r.done
             steps = 0
             max_steps = int(obs.get("max_steps", 8))
@@ -313,15 +314,21 @@ def rollout_remote(
                 if gen.get("logprobs"):
                     all_logprobs.extend(gen["logprobs"])
 
-                payload = parse_json_payload(text)
-                if not payload:
-                    break
+                raw_payload = parse_json_payload(text)
+                raw_json_valid = raw_json_valid and bool(raw_payload)
+                payload = parse_model_action(text, obs)
                 step_r = client.step(ComplianceAction(**payload))
                 obs = step_r.observation.model_dump()
                 done = step_r.done
 
             state = client.state()
             actions_history = getattr(state, "actions_history", [])
+            request_count = sum(
+                1 for action in actions_history if action.get("action_type") == "RequestInformation"
+            )
+            resolve_count = sum(
+                1 for action in actions_history if action.get("action_type") == "ResolveTicket"
+            )
             grader = grade_episode(
                 task_id=task_id,
                 actions_history=actions_history,
@@ -335,7 +342,9 @@ def rollout_remote(
                     "logprobs": all_logprobs or [0.0],
                     "grader_score": float(grader["score"]),
                     "env_reward": sum(getattr(state, "rewards_history", []) or []),
-                    "format_reward": 0.10,
+                    "format_reward": 0.05 if (raw_json_valid and resolve_count > 0) else -0.15,
+                    "loop_penalty": -0.15 * max(0, request_count - 1),
+                    "unresolved_penalty": -0.25 if resolve_count == 0 else 0.0,
                 }
             )
     return _batch_rollouts(results)
@@ -371,7 +380,7 @@ def main() -> None:
         default=None,
         help="Optional SFT adapter directory (same layout as --output-dir from sft_train.py).",
     )
-    parser.add_argument("--dataset-path", default="training/data/sft_dataset.jsonl")
+    parser.add_argument("--dataset-path", default="training/data/sft_dataset_balanced.jsonl")
     parser.add_argument("--output-dir", default="training/checkpoints/grpo")
     parser.add_argument(
         "--curriculum-stage",

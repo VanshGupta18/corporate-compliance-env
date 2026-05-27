@@ -184,14 +184,38 @@ def run_episode(
             }
         )
 
+    actions_history = runner.actions_history()
     episode_claim = claim or getattr(runner, "claim", {}) or {}
     gt = episode_claim.get("ground_truth_decision", "Approve")
     grader = grade_episode(
         task_id,
-        runner.actions_history(),
+        actions_history,
         gt,
         claim=episode_claim,
     )
+    action_counts = {
+        "SearchPolicy": sum(
+            1 for action in actions_history if action.get("action_type") == "SearchPolicy"
+        ),
+        "RequestInformation": sum(
+            1
+            for action in actions_history
+            if action.get("action_type") == "RequestInformation"
+        ),
+        "ResolveTicket": sum(
+            1 for action in actions_history if action.get("action_type") == "ResolveTicket"
+        ),
+    }
+    final_resolve = next(
+        (a for a in reversed(actions_history) if a.get("action_type") == "ResolveTicket"),
+        None,
+    )
+    final_decision = final_resolve.get("decision") if isinstance(final_resolve, dict) else None
+    loop_flag = action_counts["RequestInformation"] >= 2 and action_counts["ResolveTicket"] == 0
+    required_document = episode_claim.get("missing_document") or episode_claim.get(
+        "required_document"
+    )
+    components = grader.get("components", {})
 
     return {
         "task_id": task_id,
@@ -202,6 +226,14 @@ def run_episode(
         "done": done,
         "trajectory": trajectory,
         "ground_truth_decision": gt,
+        "grader_components": components,
+        "action_counts": action_counts,
+        "final_decision": final_decision,
+        "decision_correct": bool(final_decision and str(final_decision) == str(gt)),
+        "request_loop": loop_flag,
+        "truncated_max_steps": bool(steps >= max_steps and not final_resolve),
+        "required_document": required_document,
+        "document_request_matched": bool(components.get("correct_document_request", 0) > 0),
     }
 
 
@@ -210,6 +242,18 @@ def load_split_claims(split: str) -> List[Dict[str, Any]]:
     if split_path.exists():
         return json.loads(split_path.read_text(encoding="utf-8")).get("claims", [])
     return json.loads(Path("data/claims.json").read_text(encoding="utf-8")).get("claims", [])
+
+
+def load_baseline_scores(path: str) -> Dict[str, float]:
+    baseline_path = Path(path)
+    if not baseline_path.exists():
+        return {}
+    payload = json.loads(baseline_path.read_text(encoding="utf-8"))
+    by_task = payload.get("metrics", {}).get("performance_by_difficulty", {})
+    return {
+        task_id: float(stats.get("mean_grader_score", 0.0))
+        for task_id, stats in by_task.items()
+    }
 
 
 def main() -> None:
@@ -230,6 +274,7 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--split", default="validation")
     parser.add_argument("--episode-log-file", default="training/logs/episodes.jsonl")
+    parser.add_argument("--baseline-file", default="baseline_results.json")
     parser.add_argument("--clear-log", action="store_true")
     args = parser.parse_args()
 
@@ -243,6 +288,7 @@ def main() -> None:
     use_local = not args.use_remote_env
 
     report: Dict[str, List[float]] = {t: [] for t in TASKS}
+    episode_metrics: Dict[str, List[Dict[str, Any]]] = {t: [] for t in TASKS}
     episode_idx = 0
 
     if use_local:
@@ -262,6 +308,7 @@ def main() -> None:
                     episode_idx += 1
                     episode = run_episode(runner, model, tokenizer, task_id, claim=claim)
                     report[task_id].append(episode["grader_score"])
+                    episode_metrics[task_id].append(episode)
                     episode["episode_index"] = episode_idx
                     with log_path.open("a", encoding="utf-8") as handle:
                         handle.write(json.dumps(episode, ensure_ascii=True) + "\n")
@@ -271,12 +318,41 @@ def main() -> None:
 
     mode = "local" if use_local else "remote"
     print(f"eval_mode={mode} split={args.split}")
+    baseline_scores = load_baseline_scores(args.baseline_file)
     for task_id, scores in report.items():
         if scores:
+            episodes = episode_metrics[task_id]
+            decision_acc = mean(
+                1.0 if episode.get("decision_correct") else 0.0 for episode in episodes
+            )
+            loop_rate = mean(
+                1.0 if episode.get("request_loop") else 0.0 for episode in episodes
+            )
+            floor_rate = mean(
+                1.0 if float(episode.get("grader_score", 0.0)) <= 0.02 else 0.0
+                for episode in episodes
+            )
+            escalate_rate = mean(
+                1.0 if str(episode.get("final_decision")) == "Escalate" else 0.0
+                for episode in episodes
+            )
             print(
                 f"{task_id}: grader_mean={mean(scores):.3f} "
                 f"min={min(scores):.3f} max={max(scores):.3f} n={len(scores)}"
             )
+            print(
+                f"{task_id}: decision_acc={decision_acc:.3f} "
+                f"loop_rate={loop_rate:.3f} floor_rate={floor_rate:.3f} "
+                f"escalate_rate={escalate_rate:.3f}"
+            )
+            if task_id in baseline_scores:
+                baseline = baseline_scores[task_id]
+                delta = mean(scores) - baseline
+                gate_pass = delta >= -0.05 and loop_rate <= 0.25
+                gate = "PASS" if gate_pass else "FAIL"
+                print(
+                    f"{task_id}: baseline_mean={baseline:.3f} delta={delta:+.3f} gate={gate}"
+                )
     flat = [s for scores in report.values() for s in scores]
     if flat:
         print(f"overall_grader_mean={mean(flat):.3f}")

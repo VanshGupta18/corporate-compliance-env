@@ -91,6 +91,46 @@ def run_heuristic_episode(env: ComplianceEnv, claim: Dict[str, Any]) -> Dict[str
         "score": grade["score"],
         "components": grade.get("components", {}),
         "num_steps": len(env.state.actions_history),
+        "action_counts": {
+            "SearchPolicy": sum(
+                1
+                for action in env.state.actions_history
+                if action.get("action_type") == "SearchPolicy"
+            ),
+            "RequestInformation": sum(
+                1
+                for action in env.state.actions_history
+                if action.get("action_type") == "RequestInformation"
+            ),
+            "ResolveTicket": sum(
+                1
+                for action in env.state.actions_history
+                if action.get("action_type") == "ResolveTicket"
+            ),
+        },
+        "final_decision": (
+            next(
+                (
+                    action.get("decision")
+                    for action in reversed(env.state.actions_history)
+                    if action.get("action_type") == "ResolveTicket"
+                ),
+                None,
+            )
+        ),
+        "decision_correct": grade.get("components", {}).get("correct_decision", 0) > 0,
+        "request_loop": (
+            sum(
+                1
+                for action in env.state.actions_history
+                if action.get("action_type") == "RequestInformation"
+            )
+            >= 2
+            and not any(
+                action.get("action_type") == "ResolveTicket"
+                for action in env.state.actions_history
+            )
+        ),
         "valid_json": True,
         "useful_search": grade.get("components", {}).get("useful_search", 0) > 0,
         "correct_document_request": grade.get("components", {}).get("correct_document_request", 0) > 0,
@@ -101,12 +141,16 @@ def run_heuristic_episode(env: ComplianceEnv, claim: Dict[str, Any]) -> Dict[str
 def aggregate_episodes(episodes: List[Dict[str, Any]]) -> Dict[str, Any]:
     by_task: Dict[str, List[float]] = defaultdict(list)
     tools = defaultdict(list)
+    diagnostics = defaultdict(list)
     for ep in episodes:
         by_task[ep["task_id"]].append(ep["score"])
         tools["valid_json"].append(1.0 if ep.get("valid_json") else 0.0)
         tools["useful_search"].append(1.0 if ep.get("useful_search") else 0.0)
         tools["correct_document_request"].append(1.0 if ep.get("correct_document_request") else 0.0)
         tools["correct_decision"].append(1.0 if ep.get("correct_decision") else 0.0)
+        diagnostics["decision_accuracy"].append(1.0 if ep.get("decision_correct") else 0.0)
+        diagnostics["loop_rate"].append(1.0 if ep.get("request_loop") else 0.0)
+        diagnostics["escalate_rate"].append(1.0 if ep.get("final_decision") == "Escalate" else 0.0)
 
     per_difficulty = {}
     for tid, scores in by_task.items():
@@ -121,6 +165,7 @@ def aggregate_episodes(episodes: List[Dict[str, Any]]) -> Dict[str, Any]:
     return {
         "per_difficulty": per_difficulty,
         "tool_success_rates": {k: round(sum(v) / len(v), 4) if v else 0.0 for k, v in tools.items()},
+        "diagnostics": {k: round(sum(v) / len(v), 4) if v else 0.0 for k, v in diagnostics.items()},
         "mean_episode_length": round(
             sum(e["num_steps"] for e in episodes) / len(episodes), 2
         )
