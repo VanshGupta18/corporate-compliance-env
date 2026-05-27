@@ -99,12 +99,19 @@ def generate_rollout_completions(
     if attention_mask is not None:
         generate_kwargs["attention_mask"] = attention_mask
 
-    generation_config = generation_overrides or getattr(trainer, "generation_config", None)
-    if generation_config is not None:
-        generate_kwargs["generation_config"] = generation_config
+    if isinstance(generation_overrides, dict):
+        generate_kwargs.update(
+            {key: value for key, value in generation_overrides.items() if value is not None}
+        )
     else:
-        # Safe fallback for dry-runs / minimally configured trainers.
-        generate_kwargs.update({"max_new_tokens": 96, "do_sample": True, "temperature": 1.0})
+        generation_config = generation_overrides or getattr(trainer, "generation_config", None)
+        if generation_config is not None:
+            generate_kwargs["generation_config"] = generation_config
+        else:
+            # Safe fallback for dry-runs / minimally configured trainers.
+            generate_kwargs.update(
+                {"max_new_tokens": 96, "do_sample": True, "temperature": 1.0}
+            )
 
     model.eval()
     with torch.no_grad():
