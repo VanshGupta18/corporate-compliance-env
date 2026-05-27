@@ -2,9 +2,30 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import torch
+
+
+def cap_rollout_tokens(
+    prompt_ids: List[int],
+    completion_ids: List[int],
+    logprobs: List[float],
+    *,
+    max_prompt: int,
+    max_completion: int,
+) -> Tuple[List[int], List[int], List[float]]:
+    """Keep prompt/completion within GRPOConfig limits (model max_seq_length is 512 on T4)."""
+    capped_prompt = prompt_ids[-max_prompt:] if len(prompt_ids) > max_prompt else list(prompt_ids)
+    capped_completion = (
+        completion_ids[:max_completion]
+        if len(completion_ids) > max_completion
+        else list(completion_ids)
+    )
+    capped_logprobs = logprobs[: len(capped_completion)]
+    if len(capped_logprobs) < len(capped_completion):
+        capped_logprobs = capped_logprobs + [0.0] * (len(capped_completion) - len(capped_logprobs))
+    return capped_prompt or [0], capped_completion or [0], capped_logprobs or [0.0]
 
 
 def _resolve_model(trainer):
@@ -47,6 +68,7 @@ def generate_rollout_completions(
     prompts: List[str],
     *,
     generation_overrides: Dict[str, Any] | None = None,
+    max_prompt_length: int | None = None,
 ) -> List[Dict[str, Any]]:
     """Generate completion payloads matching the OpenEnv helper schema."""
     model = _resolve_model(trainer)
@@ -55,7 +77,15 @@ def generate_rollout_completions(
         raise RuntimeError("Trainer is missing model/tokenizer for rollout generation.")
 
     model_device = next(model.parameters()).device
-    encoded = tokenizer(prompts, return_tensors="pt", padding=True, truncation=True)
+    args = getattr(trainer, "args", None)
+    prompt_cap = max_prompt_length or int(getattr(args, "max_prompt_length", 384) or 384)
+    encoded = tokenizer(
+        prompts,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=prompt_cap,
+    )
     input_ids = encoded["input_ids"].to(model_device)
     attention_mask = encoded.get("attention_mask")
     if attention_mask is not None:

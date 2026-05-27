@@ -136,6 +136,21 @@ def test_curriculum_stages_defined():
     assert "stage_3_hard" in CURRICULUM_STAGES
 
 
+def test_cap_rollout_tokens_respects_limits():
+    from training.rollout_generation import cap_rollout_tokens
+
+    prompt, completion, logprobs = cap_rollout_tokens(
+        list(range(600)),
+        list(range(200)),
+        [-0.1] * 200,
+        max_prompt=384,
+        max_completion=96,
+    )
+    assert len(prompt) == 384
+    assert len(completion) == 96
+    assert len(logprobs) == 96
+
+
 def test_local_rollout_returns_batched_tutorial_contract(monkeypatch):
     from training import grpo_train
 

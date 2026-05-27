@@ -10,6 +10,7 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
 from typing import Any, Dict, List, Optional
 
 from datasets import load_dataset
@@ -193,19 +194,55 @@ def _grade_local_env(env: ComplianceEnv, task_id: str) -> float:
     return float(grader["score"])
 
 
+def _rollout_length_limits(trainer) -> tuple[int, int]:
+    args = getattr(trainer, "args", None)
+    max_prompt = int(getattr(args, "max_prompt_length", 384) or 384)
+    max_completion = int(getattr(args, "max_completion_length", 96) or 96)
+    return max_prompt, max_completion
+
+
+def _tokens_from_generation(trainer, gen: Dict[str, Any]) -> tuple[List[int], List[int], List[float]]:
+    from training.rollout_generation import cap_rollout_tokens
+
+    max_prompt, max_completion = _rollout_length_limits(trainer)
+    return cap_rollout_tokens(
+        list(gen.get("prompt_ids") or []),
+        list(gen.get("completion_ids") or []),
+        list(gen.get("logprobs") or []),
+        max_prompt=max_prompt,
+        max_completion=max_completion,
+    )
+
+
 def _generate_step(trainer, step_prompt: str) -> Dict[str, Any]:
     from training.rollout_generation import generate_rollout_completions
 
-    return generate_rollout_completions(trainer, [step_prompt])[0]
+    _max_prompt, max_completion = _rollout_length_limits(trainer)
+    generation_overrides = {
+        "max_new_tokens": max_completion,
+        "do_sample": True,
+        "temperature": 1.0,
+        "pad_token_id": getattr(
+            getattr(trainer, "processing_class", None) or getattr(trainer, "tokenizer", None),
+            "pad_token_id",
+            None,
+        ),
+    }
+    return generate_rollout_completions(
+        trainer,
+        [step_prompt],
+        generation_overrides=generation_overrides,
+        max_prompt_length=_max_prompt,
+    )[0]
 
 
 def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
     """Run one full ComplianceEnv episode using tutorial-style generation."""
     env = ComplianceEnv()
     env.reset(task_id=task_id, split="train")
-    all_prompt_ids: List[int] = []
-    all_completion_ids: List[int] = []
-    all_logprobs: List[float] = []
+    last_prompt_ids: List[int] = [0]
+    last_completion_ids: List[int] = [0]
+    last_logprobs: List[float] = [0.0]
     format_scores: List[float] = []
     raw_json_valid = True
     done = False
@@ -227,12 +264,9 @@ def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
         raw_json_valid = raw_json_valid and bool(valid_action)
         format_scores.append(0.10 if valid_action else -0.10)
 
-        if gen.get("prompt_ids"):
-            all_prompt_ids.extend(gen["prompt_ids"])
-        if gen.get("completion_ids"):
-            all_completion_ids.extend(gen["completion_ids"])
-        if gen.get("logprobs"):
-            all_logprobs.extend(gen["logprobs"])
+        last_prompt_ids, last_completion_ids, last_logprobs = _tokens_from_generation(
+            trainer, gen
+        )
 
         _reward, done, obs = _step_local_env(env, text, obs)
 
@@ -243,9 +277,9 @@ def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
     unresolved_penalty = -0.25 if resolve_count == 0 else 0.0
 
     return {
-        "prompt_ids": all_prompt_ids or [0],
-        "completion_ids": all_completion_ids or [0],
-        "logprobs": all_logprobs or [0.0],
+        "prompt_ids": last_prompt_ids,
+        "completion_ids": last_completion_ids,
+        "logprobs": last_logprobs,
         "grader_score": _grade_local_env(env, task_id),
         "env_reward": env.state.cumulative_reward,
         "format_reward": 0.05 if (raw_json_valid and resolve_count > 0) else -0.15,
@@ -295,9 +329,9 @@ def rollout_remote(
             ticket_id = obs.get("ticket_id")
             claim = claim_lookup.get(ticket_id, {})
 
-            all_prompt_ids: List[int] = []
-            all_completion_ids: List[int] = []
-            all_logprobs: List[float] = []
+            last_prompt_ids: List[int] = [0]
+            last_completion_ids: List[int] = [0]
+            last_logprobs: List[float] = [0.0]
             raw_json_valid = True
             done = reset_r.done
             steps = 0
@@ -308,12 +342,9 @@ def rollout_remote(
                 step_prompt = _render_step_prompt(trainer, task_id, obs)
                 gen = _generate_step(trainer, step_prompt)
                 text = _generated_text(trainer, gen)
-                if gen.get("prompt_ids"):
-                    all_prompt_ids.extend(gen["prompt_ids"])
-                if gen.get("completion_ids"):
-                    all_completion_ids.extend(gen["completion_ids"])
-                if gen.get("logprobs"):
-                    all_logprobs.extend(gen["logprobs"])
+                last_prompt_ids, last_completion_ids, last_logprobs = _tokens_from_generation(
+                    trainer, gen
+                )
 
                 raw_payload = parse_json_payload(text)
                 raw_json_valid = raw_json_valid and bool(raw_payload)
@@ -338,9 +369,9 @@ def rollout_remote(
             )
             results.append(
                 {
-                    "prompt_ids": all_prompt_ids or [0],
-                    "completion_ids": all_completion_ids or [0],
-                    "logprobs": all_logprobs or [0.0],
+                    "prompt_ids": last_prompt_ids,
+                    "completion_ids": last_completion_ids,
+                    "logprobs": last_logprobs,
                     "grader_score": float(grader["score"]),
                     "env_reward": sum(getattr(state, "rewards_history", []) or []),
                     "format_reward": 0.05 if (raw_json_valid and resolve_count > 0) else -0.15,
@@ -393,12 +424,12 @@ def main() -> None:
     parser.add_argument("--use-local-env", action="store_true", default=True)
     parser.add_argument("--use-remote-env", action="store_true", help="Use WebSocket server at api-url")
     parser.add_argument("--max-seq-length", type=int, default=512)
-    parser.add_argument("--max-prompt-length", type=int, default=1400)
-    parser.add_argument("--max-completion-length", type=int, default=128)
+    parser.add_argument("--max-prompt-length", type=int, default=384)
+    parser.add_argument("--max-completion-length", type=int, default=96)
     parser.add_argument("--num-generations", type=int, default=2)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--grad-accum", type=int, default=8)
-    parser.add_argument("--learning-rate", type=float, default=5e-6)
+    parser.add_argument("--learning-rate", type=float, default=2e-6)
     parser.add_argument("--max-train-steps", type=int, default=None)
     parser.add_argument("--warmup-steps", type=int, default=20)
     parser.add_argument("--save-steps", type=int, default=100)
@@ -512,6 +543,13 @@ def main() -> None:
         )
     if args.max_train_steps is not None:
         config_kwargs["max_steps"] = args.max_train_steps
+
+    total_cap = args.max_prompt_length + args.max_completion_length
+    if total_cap > args.max_seq_length:
+        raise ValueError(
+            f"max_prompt_length ({args.max_prompt_length}) + max_completion_length "
+            f"({args.max_completion_length}) must be <= max_seq_length ({args.max_seq_length})."
+        )
 
     config = GRPOConfig(**config_kwargs)
     rollout_fn = make_rollout_func(use_local_env=use_local, api_url=args.api_url)
