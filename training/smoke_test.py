@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -19,6 +20,42 @@ def _ok(msg: str) -> None:
 def _fail(msg: str) -> None:
     print(f"  FAIL {msg}")
     raise SystemExit(1)
+
+
+def _pkg_version(name: str) -> str | None:
+    try:
+        return version(name)
+    except PackageNotFoundError:
+        return None
+
+
+def _mm(ver: str) -> tuple[int, int]:
+    core = ver.split("+", 1)[0]
+    parts = core.split(".")
+    major = int(parts[0]) if parts and parts[0].isdigit() else 0
+    minor = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 0
+    return major, minor
+
+
+def check_dependency_versions() -> None:
+    trl_ver = _pkg_version("trl")
+    ds_ver = _pkg_version("datasets")
+    if trl_ver is None:
+        print("  WARN trl not installed in current environment")
+    else:
+        major, minor = _mm(trl_ver)
+        if (major, minor) > (0, 24):
+            print(f"  WARN trl={trl_ver} (expected <=0.24.x for Unsloth stack)")
+        else:
+            _ok(f"trl version={trl_ver}")
+    if ds_ver is None:
+        print("  WARN datasets not installed in current environment")
+    else:
+        major, minor = _mm(ds_ver)
+        if (major, minor) >= (4, 4):
+            print(f"  WARN datasets={ds_ver} (expected <4.4.0 for Unsloth stack)")
+        else:
+            _ok(f"datasets version={ds_ver}")
 
 
 def check_splits_and_sft_dataset() -> None:
@@ -81,17 +118,29 @@ def check_learning_curve() -> None:
 
 
 def check_rollout_contract() -> None:
-    from training.training_utils import grpo_supports_rollout_func
+    from training.training_utils import (
+        grpo_supports_rollout_func,
+        native_grpo_supports_rollout_func,
+    )
 
     try:
         supported = grpo_supports_rollout_func()
     except Exception as exc:
         print(f"  WARN TRL import check skipped: {exc}")
         return
+
+    try:
+        from training.rollout_generation import generate_rollout_completions  # noqa: F401
+    except Exception as exc:
+        _fail(f"rollout_generation import failed: {exc}")
+
     if supported:
-        _ok("TRL GRPOTrainer supports rollout_func")
+        if native_grpo_supports_rollout_func():
+            _ok("TRL GRPOTrainer supports rollout_func (native)")
+        else:
+            _ok("TRL rollout_func supported via compat shim")
     else:
-        print("  WARN TRL missing rollout_func — install TRL with OpenEnv support before GRPO")
+        _fail("TRL rollout_func unavailable (native + compat)")
 
 
 def check_script_dry_runs() -> None:
@@ -111,12 +160,8 @@ def check_script_dry_runs() -> None:
         text=True,
     )
     if proc.returncode != 0:
-        # Older TRL installs may lack rollout_func or mergekit; curriculum path still validated.
         out = proc.stderr or proc.stdout
-        if "rollout_func" in out or "Failed to import trl" in out:
-            print(f"  WARN grpo_train dry-run skipped (TRL env): {out.strip()[:200]}")
-        else:
-            _fail(f"grpo_train dry-run:\n{out}")
+        _fail(f"grpo_train dry-run:\n{out}")
     else:
         _ok("grpo_train.py --dry-run")
     _ok("sft_train.py --dry-run")
@@ -124,6 +169,7 @@ def check_script_dry_runs() -> None:
 
 def main() -> None:
     print("Training smoke test")
+    check_dependency_versions()
     check_splits_and_sft_dataset()
     check_curriculum_filter()
     check_learning_curve()

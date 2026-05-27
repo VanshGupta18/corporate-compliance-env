@@ -127,15 +127,17 @@ def filter_dataset_by_curriculum(dataset, stage: str):
     return Dataset.from_list(expanded)
 
 
-def grpo_supports_rollout_func() -> bool:
-    """Return True if installed TRL GRPOTrainer accepts rollout_func."""
+def get_trl_version() -> str:
     try:
-        from trl.experimental.openenv import generate_rollout_completions  # noqa: F401
+        import trl  # type: ignore
 
-        return True
+        return getattr(trl, "__version__", "unknown")
     except Exception:
-        pass
+        return "missing"
 
+
+def native_grpo_supports_rollout_func() -> bool:
+    """Return True if upstream TRL GRPOTrainer exposes rollout_func natively."""
     try:
         from trl.trainer.grpo_trainer import GRPOTrainer
     except Exception:
@@ -144,14 +146,33 @@ def grpo_supports_rollout_func() -> bool:
         except Exception:
             return False
     try:
-        sig = inspect.signature(GRPOTrainer.__init__)
-        params = sig.parameters
-        if "rollout_func" in params:
-            return True
-        # Some TRL builds accept rollout_func through **kwargs.
-        return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values())
+        return "rollout_func" in inspect.signature(GRPOTrainer.__init__).parameters
     except Exception:
         return False
+
+
+def _compat_grpo_available() -> bool:
+    try:
+        from training.grpo_trainer_compat import OpenEnvGRPOTrainer  # noqa: F401
+
+        return True
+    except Exception:
+        return False
+
+
+def grpo_supports_rollout_func() -> bool:
+    return native_grpo_supports_rollout_func() or _compat_grpo_available()
+
+
+def resolve_grpo_trainer():
+    """Resolve native GRPOTrainer when available, otherwise use compat shim."""
+    if native_grpo_supports_rollout_func():
+        from trl import GRPOTrainer  # type: ignore
+
+        return GRPOTrainer
+    from training.grpo_trainer_compat import OpenEnvGRPOTrainer
+
+    return OpenEnvGRPOTrainer
 
 
 def require_rollout_dependencies(
@@ -171,17 +192,16 @@ def require_rollout_dependencies(
     if not grpo_supports_rollout_func():
         raise RuntimeError(
             "Installed TRL GRPOTrainer does not support rollout_func. "
-            "Install a TRL build with OpenEnv support (recommended: "
-            "`pip install -U git+https://github.com/huggingface/trl.git`)."
+            "Install training/requirements-training.txt for the supported Colab stack."
         )
 
     if require_generate:
         try:
-            from trl.experimental.openenv import generate_rollout_completions  # noqa: F401
+            from training.rollout_generation import generate_rollout_completions  # noqa: F401
         except ImportError as exc:
             raise ImportError(
-                "trl.experimental.openenv.generate_rollout_completions is required for "
-                "multi-turn GRPO. Upgrade trl to match the OpenEnv tutorial version."
+                "training.rollout_generation.generate_rollout_completions is required for "
+                "multi-turn GRPO. Ensure training dependencies are installed."
             ) from exc
 
 

@@ -25,8 +25,10 @@ from training.training_utils import (
     filter_dataset_by_curriculum,
     grpo_supports_rollout_func,
     load_unsloth_model,
+    native_grpo_supports_rollout_func,
     parse_json_payload,
     require_rollout_dependencies,
+    resolve_grpo_trainer,
     resolve_precision,
 )
 
@@ -201,12 +203,8 @@ def _grade_local_env(env: ComplianceEnv, task_id: str) -> float:
 
 
 def _generate_step(trainer, step_prompt: str) -> Dict[str, Any]:
-    try:
-        from trl.experimental.openenv import generate_rollout_completions  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError(
-            "generate_rollout_completions unavailable — upgrade trl for OpenEnv rollouts."
-        ) from exc
+    from training.rollout_generation import generate_rollout_completions
+
     return generate_rollout_completions(trainer, [step_prompt])[0]
 
 
@@ -441,11 +439,14 @@ def main() -> None:
 
     if args.dry_run:
         if grpo_supports_rollout_func():
-            print("TRL rollout_func: supported")
+            if native_grpo_supports_rollout_func():
+                print("TRL rollout_func: supported (native)")
+            else:
+                print("TRL rollout_func: supported (compat shim)")
         else:
             print(
-                "WARN: TRL GRPOTrainer missing rollout_func — "
-                "install a TRL build with OpenEnv support before GPU training."
+                "WARN: TRL rollout_func unavailable — "
+                "install training/requirements-training.txt and retry."
             )
         print("Dry run OK — dataset and curriculum wiring ready.")
         return
@@ -454,11 +455,11 @@ def main() -> None:
     if not grpo_supports_rollout_func():
         raise RuntimeError(
             "TRL GRPOTrainer does not accept rollout_func. "
-            "Install a TRL build with OpenEnv support before training."
+            "Install training/requirements-training.txt and retry."
         )
 
     from transformers import TrainerCallback
-    from trl import GRPOConfig, GRPOTrainer
+    from trl import GRPOConfig
 
     class _JsonlMetricsCallback(TrainerCallback, JsonlMetricsCallback):
         pass
@@ -502,8 +503,9 @@ def main() -> None:
 
     config = GRPOConfig(**config_kwargs)
     rollout_fn = make_rollout_func(use_local_env=use_local, api_url=args.api_url)
+    trainer_cls = resolve_grpo_trainer()
 
-    trainer = GRPOTrainer(
+    trainer = trainer_cls(
         model=model,
         processing_class=tokenizer,
         reward_funcs=[action_json_reward, grader_reward],
