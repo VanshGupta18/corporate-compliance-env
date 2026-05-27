@@ -17,7 +17,13 @@ from training.training_utils import (
     normalize_compliance_action,
     parse_json_payload,
     parse_model_action,
+    validate_training_checkpoint,
 )
+
+
+def test_validate_training_checkpoint_missing_local_path():
+    with pytest.raises(FileNotFoundError, match="Training checkpoint not found"):
+        validate_training_checkpoint("training/checkpoints/sft")
 
 
 def test_normalize_compliance_action_maps_notify_and_strips_observation_fields():

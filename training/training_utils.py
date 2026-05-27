@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 # Curriculum stage definitions (OpenEnv course module-5 style progression)
@@ -468,6 +469,37 @@ def require_rollout_dependencies(
             ) from exc
 
 
+def _looks_like_local_checkpoint(model_id: str) -> bool:
+    if model_id.startswith((".", "/")) or "checkpoints" in model_id:
+        return True
+    path = Path(model_id)
+    return path.exists()
+
+
+def validate_training_checkpoint(model_id: str) -> None:
+    """Fail fast when a local SFT/GRPO checkpoint path is missing or incomplete."""
+    if not _looks_like_local_checkpoint(model_id):
+        return
+
+    path = Path(model_id)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Training checkpoint not found: {model_id}\n"
+            "Run SFT warm-start before GRPO (notebook section 4):\n"
+            "  python -m training.sft_train "
+            "--dataset-path training/data/sft_dataset_balanced.jsonl "
+            "--output-dir training/checkpoints/sft"
+        )
+
+    has_adapter = (path / "adapter_config.json").is_file()
+    has_base_config = (path / "config.json").is_file()
+    if not has_adapter and not has_base_config:
+        raise FileNotFoundError(
+            f"Incomplete checkpoint at {model_id}: missing adapter_config.json.\n"
+            "Re-run SFT and confirm training/checkpoints/sft contains adapter weights."
+        )
+
+
 def load_unsloth_model(
     model_id: str,
     max_seq_length: int,
@@ -477,6 +509,10 @@ def load_unsloth_model(
 ):
     from unsloth import FastLanguageModel
 
+    validate_training_checkpoint(model_id)
+    path = Path(model_id)
+    is_saved_adapter = path.is_dir() and (path / "adapter_config.json").is_file()
+
     model, tokenizer = FastLanguageModel.from_pretrained(
         model_id,
         max_seq_length=max_seq_length,
@@ -485,7 +521,8 @@ def load_unsloth_model(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    if for_training:
+    # Saved LoRA adapters already include PEFT weights; do not stack a new adapter.
+    if for_training and not is_saved_adapter:
         model = FastLanguageModel.get_peft_model(
             model,
             r=16,

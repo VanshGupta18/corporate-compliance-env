@@ -31,6 +31,7 @@ from training.training_utils import (
     render_compliance_prompt,
     resolve_grpo_trainer,
     resolve_precision,
+    validate_training_checkpoint,
 )
 
 try:
@@ -475,6 +476,8 @@ def main() -> None:
 
     use_bf16, use_fp16 = resolve_precision(args.precision)
     model_id = args.sft_checkpoint or args.model_id
+    if args.sft_checkpoint:
+        validate_training_checkpoint(args.sft_checkpoint)
     model, tokenizer = load_unsloth_model(
         model_id,
         args.max_seq_length,
