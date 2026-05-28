@@ -14,7 +14,22 @@ POLICY_SNIPPETS: Dict[str, List[Tuple[List[str], str]]] = {
         (["receipt", "meal"], "Rule 2: Meals between Rs500 and Rs2000 require a valid receipt."),
     ],
     "large meal": [
-        (["large", "meal", "manager", "2000"], "Rule 3: Meals above Rs2000 require receipt AND manager approval note."),
+        (
+            [
+                "large",
+                "meal",
+                "manager",
+                "2000",
+                "dinner",
+                "lunch",
+                "entertainment",
+                "client",
+                "celebration",
+                "team",
+                "offsite",
+            ],
+            "Rule 3: Meals above Rs2000 require receipt AND manager approval note.",
+        ),
     ],
     "daytime cab": [
         (["cab", "day", "daytime", "before", "10"], "Rule 7: Cab rides before 10:00 PM require a manager approval note explaining business purpose."),
@@ -38,7 +53,10 @@ POLICY_SNIPPETS: Dict[str, List[Tuple[List[str], str]]] = {
         (["wfh", "internet", "electricity", "remote"], "Rule 11: WFH utility claims capped at Rs1000/month."),
     ],
     "gst": [
-        (["gst", "invoice", "5000"], "Rule 12: Claims above Rs5000 require GST-compliant invoice with GSTIN."),
+        (
+            ["gst", "invoice", "5000", "software", "vendor", "license", "procurement", "subscription"],
+            "Rule 12: Claims above Rs5000 require GST-compliant invoice with GSTIN.",
+        ),
     ],
     "duplicate": [
         (["duplicate", "same day", "same amount"], "Rule 13: Same employee, same amount, same date = auto reject second claim."),
@@ -84,6 +102,12 @@ def match_policy_snippet(rule_keyword: str, query: str) -> Tuple[str, bool]:
         part in q for part in rule_keyword.split()
     ):
         if entries:
+            return entries[0][1], True
+
+    # Description-style queries: any keyword from this rule's entries counts as relevant
+    if entries:
+        all_keywords = {kw for kws, _ in entries for kw in kws}
+        if any(kw in q for kw in all_keywords):
             return entries[0][1], True
 
     return DISTRACTOR_SNIPPET, False

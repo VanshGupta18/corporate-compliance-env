@@ -3,6 +3,7 @@
 import pytest
 
 from app.models import ComplianceAction, ActionType, TicketDecision
+from app.policy_snippets import match_policy_snippet
 from app.server.environment import ComplianceEnv
 
 
@@ -17,6 +18,31 @@ def test_easy_hides_nothing_and_penalizes_search(env):
     obs = env.step(ComplianceAction(action_type=ActionType.SEARCH_POLICY, query="meal"))
     assert obs.rule_keyword != "hidden"
     assert obs.reward is not None and obs.reward < 0
+
+
+def test_entertainment_query_matches_large_meal_policy():
+    snippet, relevant = match_policy_snippet(
+        "large meal", "Client entertainment dinner policy"
+    )
+    assert relevant is True
+    assert "Rule 3" in snippet
+
+
+def test_repeat_search_policy_is_penalized(env):
+    claim = next(c for c in env.claims if c.get("task_difficulty") == "medium")
+    env.reset(task_id="medium", claim_id=claim["id"])
+    first = env.step(
+        ComplianceAction(
+            action_type=ActionType.SEARCH_POLICY,
+            query=claim.get("rule_keyword", "meal"),
+        )
+    )
+    assert first.policy_retrieved is True
+    second = env.step(
+        ComplianceAction(action_type=ActionType.SEARCH_POLICY, query="meal again")
+    )
+    assert second.reward is not None and second.reward <= -0.25
+    assert "already retrieved" in second.env_message.lower()
 
 
 def test_medium_hides_rule_keyword_until_search(env):
@@ -102,7 +128,26 @@ def test_hard_document_request_clears_missing(env):
     if claim.get("document_outcome") == "provided":
         assert obs.missing_document is None
     else:
-        assert obs.missing_document == "required"
+        assert obs.missing_document is None
+        assert "resolve" in obs.env_message.lower()
+
+
+def test_medium_reveals_document_type_after_search(env):
+    claim = next(
+        c
+        for c in env.claims
+        if c.get("task_difficulty") == "medium"
+        and c.get("missing_document") == "gst_invoice"
+    )
+    env.reset(task_id="medium", claim_id=claim["id"])
+    assert env._get_observation().missing_document == "required"
+    obs = env.step(
+        ComplianceAction(
+            action_type=ActionType.SEARCH_POLICY,
+            query="gst",
+        )
+    )
+    assert obs.missing_document == "gst_invoice"
 
 
 def test_hard_duplicate_request_is_penalized(env):

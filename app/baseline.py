@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.client import ComplianceEnvClient
+from app.document_utils import infer_required_document as _infer_required_document
 from app.graders import grade_episode
 from app.models import ComplianceAction, ActionType, TicketDecision
 
@@ -35,19 +36,6 @@ class Tee:
     def flush(self) -> None:
         for stream in self.streams:
             stream.flush()
-
-
-def _infer_required_document(observation: Dict[str, Any]) -> str:
-    rule_keyword = (observation.get("rule_keyword") or "").lower()
-    description = (observation.get("description") or "").lower()
-    text = f"{rule_keyword} {description}"
-    if "international" in text or "vp" in text:
-        return "vp_approval"
-    if "gst" in text or (observation.get("amount", 0) or 0) > 5000:
-        return "gst_invoice"
-    if "wfh" in text or "internet" in text or "electricity" in text:
-        return "utility_bill"
-    return "manager_approval"
 
 
 def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
@@ -110,14 +98,18 @@ class BaselineAgent:
                 "reason": "Personal expense (Rule 15)",
             }
 
-        if observation.get("rule_keyword") == "hidden" or (
-            "meal" not in rule_keyword and "cab" not in rule_keyword and rule_keyword
-        ):
-            query = rule_keyword if rule_keyword != "hidden" else "policy"
+        if str(observation.get("rule_keyword", "")).lower() == "hidden":
+            query = "policy"
             if "cab" in description or "ride" in description:
-                query = "daytime cab" if "before" in description or "business hours" in description else "cab"
-            elif "meal" in description or "dinner" in description:
+                query = (
+                    "daytime cab"
+                    if "before" in description or "business hours" in description
+                    else "cab"
+                )
+            elif "meal" in description or "dinner" in description or "lunch" in description:
                 query = "meal"
+            elif rule_keyword and rule_keyword != "hidden":
+                query = rule_keyword
             return {"action_type": "SearchPolicy", "query": query}
 
         if missing_doc and missing_doc not in (None, "required"):
@@ -223,11 +215,24 @@ class BaselineAgent:
                 done = step_result.done
                 total_reward += reward
                 rewards.append(reward)
-                print(
-                    f"[STEP] step={step_count} action={action_dict['action_type']} "
-                    f"reward={reward:.2f} done={str(done).lower()}",
-                    flush=True,
-                )
+                parts = [
+                    f"[STEP] step={step_count}",
+                    f"action={action_dict['action_type']}",
+                    f"reward={reward:.2f}",
+                    f"done={str(done).lower()}",
+                ]
+                if action_dict.get("query"):
+                    q = str(action_dict["query"]).replace('"', "'")
+                    parts.append(f'query="{q}"')
+                if action_dict.get("message"):
+                    m = str(action_dict["message"]).replace('"', "'")
+                    parts.append(f'message="{m}"')
+                if action_dict.get("decision"):
+                    parts.append(f"decision={action_dict['decision']}")
+                if action_dict.get("reason"):
+                    r = str(action_dict["reason"]).replace('"', "'")[:120]
+                    parts.append(f'reason="{r}"')
+                print(" ".join(parts), flush=True)
 
             state = client.state()
             actions_history = getattr(state, "actions_history", []) or []
@@ -282,6 +287,7 @@ def main() -> None:
 
     for claim in claims:
         difficulty = claim["task_difficulty"]
+        print(f"Running baseline for claim {claim['id']} ({difficulty})...", flush=True)
         try:
             result = agent.run_episode(
                 task_id=difficulty,

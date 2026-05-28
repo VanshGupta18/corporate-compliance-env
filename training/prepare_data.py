@@ -85,7 +85,10 @@ def choose_action(
         }
 
     if task_id == "medium":
-        if observation.get("rule_keyword") == "hidden" or not observation.get("env_message"):
+        if (
+            observation.get("rule_keyword") == "hidden"
+            and not observation.get("policy_retrieved")
+        ):
             return {"action_type": "SearchPolicy", "query": rule}
         return {
             "action_type": "ResolveTicket",
@@ -94,7 +97,10 @@ def choose_action(
         }
 
     # hard
-    if observation.get("rule_keyword") == "hidden" or not observation.get("env_message"):
+    if (
+        observation.get("rule_keyword") == "hidden"
+        and not observation.get("policy_retrieved")
+    ):
         return {"action_type": "SearchPolicy", "query": rule}
     req = claim.get("required_document") or claim.get("missing_document")
     if req and observation.get("missing_document"):

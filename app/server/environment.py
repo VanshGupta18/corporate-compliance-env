@@ -8,6 +8,7 @@ from pathlib import Path
 from openenv.core.env_server import Environment
 
 from app.models import ComplianceAction, ComplianceObservation, ComplianceState
+from app.document_utils import infer_required_document
 from app.policy_snippets import document_simulation, match_policy_snippet
 
 
@@ -32,6 +33,7 @@ class ComplianceEnv(Environment):
         self._ever_useful_search = False
         self._document_requested = False
         self._document_satisfied = False
+        self._document_request_resolved = False
         self._last_requested_document = None
         self._env_message = ""
 
@@ -83,6 +85,7 @@ class ComplianceEnv(Environment):
         self._ever_useful_search = False
         self._document_requested = False
         self._document_satisfied = False
+        self._document_request_resolved = False
         self._last_requested_document = None
         self._env_message = ""
 
@@ -144,6 +147,12 @@ class ComplianceEnv(Environment):
             elif task_id == "easy":
                 reward = -0.15
                 self._env_message = "Easy tasks do not require policy search. Resolve directly."
+            elif self._has_searched_policy():
+                reward = -0.35 if self._ever_useful_search else -0.25
+                self._env_message = (
+                    "Policy already retrieved. Do not search again — "
+                    "use RequestInformation (if a document is missing) or ResolveTicket."
+                )
             else:
                 snippet, relevant = match_policy_snippet(
                     claim.get("rule_keyword", ""), action.query or ""
@@ -174,6 +183,12 @@ class ComplianceEnv(Environment):
                     self._env_message = (
                         "Required document already received. Resolve the ticket now."
                     )
+                elif self._document_request_resolved:
+                    reward = -0.3
+                    self._env_message = (
+                        "Document already requested. Resolve the ticket now "
+                        "(Approve/Reject/Escalate)."
+                    )
                 elif (
                     required in msg
                     or required.replace("_", " ") in msg
@@ -193,12 +208,20 @@ class ComplianceEnv(Environment):
                         claim["_document_cleared"] = True
                         reward = -0.05 if duplicate else 0.2
                     else:
-                        reward = -0.2 if duplicate else 0.05
+                        self._document_request_resolved = True
+                        reward = -0.2 if duplicate else 0.1
+                        self._env_message = (
+                            f"{document_simulation(doc_type, claim)} "
+                            "Resolve the ticket now; do not request the same document again."
+                        )
                 else:
                     reward = -0.1
+                    hint = infer_required_document(
+                        self._get_observation().model_dump(), claim
+                    )
                     self._env_message = (
                         f"Requested document does not match required '{required}'. "
-                        "Be specific in your request message."
+                        f"Request '{hint}' explicitly in your message."
                     )
 
             return self._finalize_step(reward, action)
@@ -260,10 +283,16 @@ class ComplianceEnv(Environment):
         md = claim.get("missing_document") or claim.get("required_document")
         if task_id == "easy":
             return claim.get("missing_document")
-        if self._document_satisfied or claim.get("_document_cleared"):
+        if (
+            self._document_satisfied
+            or self._document_request_resolved
+            or claim.get("_document_cleared")
+        ):
             return None
         if task_id in ("medium", "hard") and md:
-            return "required"  # hide exact type until requested
+            if self._policy_revealed:
+                return md
+            return "required"
         return claim.get("missing_document")
 
     def _get_observation(self):
@@ -286,6 +315,7 @@ class ComplianceEnv(Environment):
             has_receipt=claim["has_receipt"],
             missing_document=self._visible_missing_document(claim, task_id),
             rule_keyword=self._visible_rule_keyword(claim, task_id),
+            policy_retrieved=self._policy_revealed,
             risk_score=claim["risk_score"],
             env_message=self._env_message,
             step_count=self._state.step_count,

@@ -101,6 +101,8 @@ observation:
       type: ["string", "null"]
     rule_keyword:
       type: string
+    policy_retrieved:
+      type: boolean
     risk_score:
       type: number
       minimum: 0

@@ -21,6 +21,7 @@ from typing import Dict, Optional, Any
 
 from openai import OpenAI
 from app.client import ComplianceEnvClient
+from app.document_utils import infer_required_document
 from app.models import ComplianceAction, ComplianceObservation
 from app.graders import grade_episode
 from training.training_utils import parse_model_action
@@ -48,6 +49,28 @@ class Tee:
         for stream in self.streams:
             stream.flush()
 
+def _format_step_log(step: int, action: ComplianceAction, reward: float, done: bool) -> str:
+    """Structured step line so the dashboard can show policy queries and decisions."""
+    parts = [
+        f"[STEP] step={step}",
+        f"action={action.action_type}",
+        f"reward={reward:.2f}",
+        f"done={str(done).lower()}",
+    ]
+    if action.query:
+        q = str(action.query).replace('"', "'")
+        parts.append(f'query="{q}"')
+    if action.message:
+        m = str(action.message).replace('"', "'")
+        parts.append(f'message="{m}"')
+    if action.decision is not None:
+        parts.append(f"decision={action.decision}")
+    if action.reason:
+        r = str(action.reason).replace('"', "'")[:120]
+        parts.append(f'reason="{r}"')
+    return " ".join(parts)
+
+
 # ===== Task Configuration =====
 TASKS = ["easy", "medium", "hard"]
 MAX_STEPS_PER_TASK = 10
@@ -66,9 +89,10 @@ SYSTEM_PROMPT = textwrap.dedent(
     
     Valid decisions: "Approve", "Reject", "Escalate"
     
-    Do not assume hidden policy details. Use SearchPolicy when the relevant rule is
-    hidden or unclear. Use RequestInformation when the ticket indicates a required
-    document is missing.
+    Use SearchPolicy at most once per episode, and only when rule_keyword is "hidden"
+    (medium/hard tasks). Use short queries: meal, large meal, gst, cab, international.
+    After policy_retrieved is true, never search again. Use RequestInformation only when
+    missing_document is set (not null). After a document response, ResolveTicket immediately.
     
     Respond with ONLY a valid action in JSON format:
     {"action_type": "...", "query": "...", "message": "...", "decision": "...", "reason": "..."}
@@ -81,11 +105,45 @@ def build_user_prompt(observation: Dict, step: int) -> str:
     max_steps = int(observation.get("max_steps") or MAX_STEPS_PER_TASK)
     steps_remaining = (max_steps - step + 1)
     
-    # Add urgency message if running low on steps
+    policy_retrieved = bool(observation.get("policy_retrieved"))
+    missing_doc = observation.get("missing_document")
+    policy_note = ""
+    if policy_retrieved:
+        if missing_doc:
+            if missing_doc == "required":
+                hint = infer_required_document(observation)
+                policy_note = (
+                    f"\nPolicy retrieved. Do NOT SearchPolicy again. "
+                    f"RequestInformation must name '{hint}' (not the word 'required'). "
+                    "Then ResolveTicket."
+                )
+            else:
+                policy_note = (
+                    f"\nPolicy retrieved. Request '{missing_doc}' if not yet requested, "
+                    "then ResolveTicket. Do NOT SearchPolicy again."
+                )
+        else:
+            policy_note = (
+                "\nPolicy retrieved. No missing document — ResolveTicket now. "
+                "Do NOT SearchPolicy or RequestInformation."
+            )
+    elif observation.get("rule_keyword") == "hidden":
+        policy_note = (
+            "\nPolicy rule is hidden. SearchPolicy once with a short query "
+            "(meal, large meal, gst, cab), then proceed."
+        )
+    elif missing_doc == "required":
+        policy_note = (
+            f"\nSearchPolicy first, then request '{infer_required_document(observation)}'."
+        )
+
     urgency = ""
     if step >= 3:
-        urgency = "\n⚠️  URGENT: You only have {} step(s) remaining. YOU MUST MAKE A FINAL DECISION NOW.\nDo NOT search policy again. Make your FINAL decision: Approve, Reject, or Escalate.".format(steps_remaining - 1)
-    
+        urgency = (
+            f"\nURGENT: {steps_remaining - 1} step(s) left. "
+            "Do NOT search policy again. Resolve the ticket now."
+        )
+
     prompt = textwrap.dedent(
         f"""
         Step: {step}/{max_steps}
@@ -97,7 +155,9 @@ def build_user_prompt(observation: Dict, step: int) -> str:
         Description: {observation.get('description')}
         Has Receipt: {observation.get('has_receipt')}
         Missing Document: {observation.get('missing_document')}
-        Risk Score: {observation.get('risk_score')}
+        Rule keyword: {observation.get('rule_keyword')}
+        Policy retrieved: {policy_retrieved}
+        Environment message: {observation.get('env_message', '')}{policy_note}
         
         Your Task:
         - Review the ticket against policy rules
@@ -140,15 +200,7 @@ def rule_based_fallback(observation: Dict) -> Dict:
     # If missing documents, request them
     if missing_doc:
         if missing_doc == "required":
-            text = f"{rule_keyword} {description}"
-            if "international" in text or "vp" in text:
-                missing_doc = "vp_approval"
-            elif "gst" in text or amount > 5000:
-                missing_doc = "gst_invoice"
-            elif "wfh" in text or "internet" in text or "electricity" in text:
-                missing_doc = "utility_bill"
-            else:
-                missing_doc = "manager_approval"
+            missing_doc = infer_required_document(observation)
         return {
             "action_type": "RequestInformation",
             "message": f"Please provide {missing_doc}",
@@ -235,7 +287,7 @@ def run_episode(
             observation = step_result.observation
             reward = step_result.reward or 0.0
             
-            print(f"[STEP] step={step} action={action.action_type} reward={reward:.2f} done={str(step_result.done).lower()} error=null", flush=True)
+            print(_format_step_log(step, action, reward, step_result.done), flush=True)
 
             action_data["reward"] = reward
             episode_data["steps"].append(action_data)
@@ -252,7 +304,7 @@ def run_episode(
         observation = step_result.observation
         reward = step_result.reward or 0.0
 
-        print(f"[STEP] step={step} action={action.action_type} reward={reward:.2f} done={str(step_result.done).lower()} error=null", flush=True)
+        print(_format_step_log(step, action, reward, step_result.done), flush=True)
 
         action_data["reward"] = reward
         episode_data["steps"].append(action_data)
@@ -330,7 +382,7 @@ def main() -> None:
 
         metrics = {
             "overall_metrics": {
-                "total_evaluations": len(all_scores),
+                "total_claims": len(all_scores),
                 "mean_grader_score": sum(all_scores) / len(all_scores) if all_scores else 0,
             },
             "performance_by_difficulty": {},
@@ -341,11 +393,21 @@ def main() -> None:
                 "mean_grader_score": sum(scores) / len(scores) if scores else 0,
                 "total": len(scores),
             }
-            
+
+        results_payload = {"metrics": metrics}
         with open("inference_results.json", "w", encoding="utf-8") as f:
-            json.dump(metrics, f, indent=2)
-            
-        print("Inference complete. Results saved to inference_results.json.")
+            json.dump(results_payload, f, indent=2)
+
+        print("\n[SUMMARY] Inference Results:", flush=True)
+        print(
+            f"  OVERALL: {metrics['overall_metrics']['mean_grader_score']:.3f} "
+            f"(n={len(all_scores)})",
+            flush=True,
+        )
+        for diff in ["easy", "medium", "hard"]:
+            d = metrics["performance_by_difficulty"][diff]
+            print(f"  {diff.upper()}: {d['mean_grader_score']:.3f} (n={d['total']})", flush=True)
+        print("[SAVED] inference_results.json", flush=True)
 
     except Exception as e:
         import traceback

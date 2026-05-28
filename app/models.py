@@ -38,6 +38,7 @@ class ComplianceObservation(Observation):
     has_receipt: bool
     missing_document: Optional[str] = None
     rule_keyword: str
+    policy_retrieved: bool = False
     risk_score: float = Field(..., ge=0, le=1)
     env_message: str
     step_count: int

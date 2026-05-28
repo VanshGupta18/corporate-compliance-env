@@ -28,9 +28,9 @@ COMPLIANCE_SYSTEM_PROMPT = """\
 You are an AI Compliance Officer. Audit employee expense claims against company policy.
 
 Use the available action JSON types:
-- SearchPolicy when policy details are hidden or unclear.
-- RequestInformation when a required document is missing.
-- ResolveTicket when you are ready to decide Approve, Reject, or Escalate.
+- SearchPolicy once when rule_keyword is hidden (short query: meal, gst, cab).
+- RequestInformation only when missing_document is set; name the concrete doc type.
+- ResolveTicket after policy is retrieved and any document request is answered.
 - If missing_document is "required", infer the likely concrete document type
   (manager_approval, gst_invoice, vp_approval, or utility_bill) before requesting it.
 
@@ -53,6 +53,7 @@ _OBSERVATION_FIELD_NAMES = frozenset(
         "has_receipt",
         "missing_document",
         "rule_keyword",
+        "policy_retrieved",
         "risk_score",
         "env_message",
         "step_count",
@@ -128,10 +129,11 @@ def _infer_action_type(
         step_count = int(observation.get("step_count", 1) or 1)
         if step_count >= max_steps - 1:
             return "ResolveTicket"
-        if observation.get("rule_keyword") == "hidden":
+        if (
+            observation.get("rule_keyword") == "hidden"
+            and not observation.get("policy_retrieved")
+        ):
             return "SearchPolicy"
-    if observation and int(observation.get("step_count", 1) or 1) <= 2:
-        return "SearchPolicy"
     return "ResolveTicket"
 
 
@@ -331,6 +333,7 @@ def build_step_prompt(observation: Dict[str, Any]) -> str:
             "has_receipt",
             "missing_document",
             "rule_keyword",
+            "policy_retrieved",
             "risk_score",
             "env_message",
             "step_count",
@@ -339,14 +342,25 @@ def build_step_prompt(observation: Dict[str, Any]) -> str:
         if k in observation
     }
     extra = ""
+    if clean.get("policy_retrieved"):
+        extra += "\nPolicy already retrieved. Do not SearchPolicy again."
+        if not clean.get("missing_document"):
+            extra += " ResolveTicket now; no further document requests."
+    elif clean.get("rule_keyword") == "hidden":
+        extra += "\nPolicy hidden. SearchPolicy once with a short query (meal, gst, cab), then continue."
     missing = clean.get("missing_document")
     step_count = int(clean.get("step_count", 1) or 1)
     max_steps = int(clean.get("max_steps", 8) or 8)
     if missing == "required":
+        from app.document_utils import infer_required_document
+
+        hint = infer_required_document(clean)
         extra += (
-            "\nThe ticket requires a document. Request the specific document type, "
-            "not the word 'required'."
+            f"\nDocument required. After search, request '{hint}' explicitly "
+            "(not the word 'required'), then resolve."
         )
+    elif missing:
+        extra += f"\nRequest missing document '{missing}', then resolve."
     if step_count >= max_steps - 1:
         extra += "\nYou are near max steps; resolve now unless a required document is still pending."
     return (

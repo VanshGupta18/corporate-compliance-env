@@ -16,9 +16,9 @@ from app.models import (
 )
 from app.graders import grade_episode
 from app.baseline import BaselineAgent
-from app.dashboard import build_demo
+from app.dashboard import build_demo, _render_dashboard
 from fastapi import HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 import uvicorn
 from pathlib import Path
 from typing import Dict
@@ -52,18 +52,23 @@ app.openapi_tags = [
 ]
 
 
-@app.get("/", response_model=RootResponse, tags=["core"])
+@app.get("/", tags=["core"])
 async def root(request: Request):
-    """Root endpoint for platform readiness checks and docs discovery."""
+    """Root endpoint — serves React dashboard for browsers, JSON for API clients."""
     accept = request.headers.get("accept", "")
     if "text/html" in accept:
-        return RedirectResponse(url="/demo", status_code=307)
-
+        return HTMLResponse(content=_render_dashboard())
     return RootResponse(
         status="ok",
         service="corporate-compliance-env",
         docs_url="/docs",
     )
+
+
+@app.get("/dashboard", response_class=HTMLResponse, tags=["demo"])
+async def serve_dashboard():
+    """Serve the full React-powered compliance benchmark dashboard."""
+    return HTMLResponse(content=_render_dashboard())
 
 
 # ============================================================================
