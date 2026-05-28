@@ -7,7 +7,7 @@ from pathlib import Path
 
 from openenv.core.env_server import Environment
 
-from app.models import ComplianceAction, ComplianceObservation, ComplianceState
+from app.models import ComplianceAction, ComplianceObservation, ComplianceState, TicketDecision
 from app.document_utils import infer_required_document
 from app.policy_snippets import document_simulation, match_policy_snippet
 
@@ -118,6 +118,18 @@ class ComplianceEnv(Environment):
     @staticmethod
     def _clamp_reward(reward: float) -> float:
         return max(-1.0, min(1.0, reward))
+
+    @staticmethod
+    def _decision_value(decision) -> str | None:
+        """Normalize TicketDecision enum or string to Approve/Reject/Escalate."""
+        if decision is None:
+            return None
+        if isinstance(decision, TicketDecision):
+            return decision.value
+        text = str(decision)
+        if text.startswith("TicketDecision."):
+            return text.rsplit(".", 1)[-1]
+        return text
 
     def _finalize_step(self, reward: float, action: ComplianceAction) -> ComplianceObservation:
         reward = self._clamp_reward(reward)
@@ -231,10 +243,13 @@ class ComplianceEnv(Environment):
                 reward = -0.1
                 return self._finalize_step(reward, action)
 
-            if task_id == "medium" and not self._has_searched_policy():
-                reward -= 0.25
-            elif task_id == "medium" and not self._ever_useful_search:
-                reward -= 0.15
+            decision = self._decision_value(action.decision)
+
+            if task_id == "medium":
+                if not self._has_searched_policy():
+                    reward -= 1.0
+                elif not self._ever_useful_search:
+                    reward -= 0.4
 
             if task_id == "hard":
                 required = claim.get("missing_document") or claim.get("required_document")
@@ -249,14 +264,15 @@ class ComplianceEnv(Environment):
                 if (
                     required
                     and claim.get("document_outcome") == "not_provided"
-                    and str(action.decision) == "Approve"
+                    and decision == TicketDecision.APPROVE.value
                 ):
                     reward -= 0.3
                 if not self._has_searched_policy():
                     reward -= 0.15
 
             gt = claim.get("ground_truth_decision")
-            is_correct = action.decision == gt or str(action.decision) == str(gt)
+            gt_value = self._decision_value(gt) or str(gt)
+            is_correct = decision == gt_value
             reward += 1.0 if is_correct else -1.0
             self._state.is_done = True
 

@@ -150,6 +150,64 @@ def test_medium_reveals_document_type_after_search(env):
     assert obs.missing_document == "gst_invoice"
 
 
+def test_hard_approve_without_document_applies_penalty(env):
+    claim = next(
+        c
+        for c in env.claims
+        if c.get("id") == "EXP-20082"
+        or (
+            c.get("task_difficulty") == "hard"
+            and c.get("document_outcome") == "not_provided"
+            and c.get("ground_truth_decision") == "Approve"
+        )
+    )
+    env.reset(task_id="hard", claim_id=claim["id"])
+    env.step(
+        ComplianceAction(
+            action_type=ActionType.SEARCH_POLICY,
+            query=claim.get("rule_keyword", "meal"),
+        )
+    )
+    req = claim.get("missing_document") or claim.get("required_document")
+    env.step(
+        ComplianceAction(
+            action_type=ActionType.REQUEST_INFORMATION,
+            message=f"Please provide {req}",
+        )
+    )
+    obs = env.step(
+        ComplianceAction(
+            action_type=ActionType.RESOLVE_TICKET,
+            decision=TicketDecision.APPROVE,
+            reason="Approve without received document.",
+        )
+    )
+    assert obs.reward is not None
+    assert obs.reward <= 0.75
+    assert obs.reward > 0.5
+
+
+def test_medium_resolve_without_search_is_not_positive(env):
+    claim = next(
+        c
+        for c in env.claims
+        if c.get("task_difficulty") == "medium"
+        and c.get("ground_truth_decision") == "Escalate"
+        and str(c.get("employee_level", "")).startswith("L")
+    )
+    env.reset(task_id="medium", claim_id=claim["id"])
+    obs = env.step(
+        ComplianceAction(
+            action_type=ActionType.RESOLVE_TICKET,
+            decision=TicketDecision(claim["ground_truth_decision"]),
+            reason="Escalate without policy search.",
+        )
+    )
+    assert obs.done
+    assert obs.reward is not None
+    assert obs.reward <= 0.0
+
+
 def test_hard_duplicate_request_is_penalized(env):
     claim = next(
         c
