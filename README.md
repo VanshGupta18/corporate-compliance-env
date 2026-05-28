@@ -122,7 +122,7 @@ pytest tests/ -q
 ### Baseline and inference
 
 ```bash
-python app/baseline.py          # writes baseline_results.json (gitignored)
+python app/baseline.py          # uses COMPLIANCE_API or the default HF Space
 python inference.py             # writes inference_results.json (gitignored)
 ```
 

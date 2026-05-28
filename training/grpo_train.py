@@ -151,7 +151,7 @@ def _trainer_tokenizer(trainer):
 
 def _render_step_prompt(trainer, task_id: str, observation: Dict[str, Any]) -> str:
     """Render the next-step prompt in the chat-template style used by the tutorial."""
-    return render_compliance_prompt(_trainer_tokenizer(trainer), task_id, observation)
+    return render_compliance_prompt(_trainer_tokenizer(trainer), observation)
 
 
 def _generated_text(trainer, generation: Dict[str, Any]) -> str:

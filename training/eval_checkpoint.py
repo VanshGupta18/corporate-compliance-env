@@ -139,7 +139,7 @@ def generate_action(
     task_id: str,
     observation: Dict[str, Any],
 ) -> Dict[str, Any]:
-    prompt = render_compliance_prompt(tokenizer, task_id, observation)
+    prompt = render_compliance_prompt(tokenizer, observation)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
     input_len = inputs["input_ids"].shape[1]
     pad_id = tokenizer.pad_token_id

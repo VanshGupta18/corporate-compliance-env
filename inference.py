@@ -12,7 +12,6 @@ MANDATORY
 """
 
 import os
-import re
 import json
 import textwrap
 from typing import Dict, Optional, Any
@@ -21,6 +20,7 @@ from openai import OpenAI
 from app.client import ComplianceEnvClient
 from app.models import ComplianceAction, ComplianceObservation
 from app.graders import grade_episode
+from training.training_utils import parse_model_action
 
 # ===== Environment Configuration =====
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
@@ -56,8 +56,8 @@ SYSTEM_PROMPT = textwrap.dedent(
 ).strip()
 
 
-def build_user_prompt(observation: Dict, task_id: str, step: int) -> str:
-    """Build the user prompt from the current observation."""
+def build_user_prompt(observation: Dict, step: int) -> str:
+    """Build the user prompt from the current observation (no curriculum labels)."""
     max_steps = int(observation.get("max_steps") or MAX_STEPS_PER_TASK)
     steps_remaining = (max_steps - step + 1)
     
@@ -68,7 +68,7 @@ def build_user_prompt(observation: Dict, task_id: str, step: int) -> str:
     
     prompt = textwrap.dedent(
         f"""
-        Task: {task_id} | Step: {step}/{max_steps}
+        Step: {step}/{max_steps}
         
         Ticket ID: {observation.get('ticket_id')}
         Employee: {observation.get('employee_name')} ({observation.get('employee_role')})
@@ -157,47 +157,6 @@ def rule_based_fallback(observation: Dict) -> Dict:
     }
 
 
-def parse_model_response(response_text: str) -> Optional[Dict]:
-    """Parse the model's response into an action."""
-    try:
-        # Try to extract JSON from the response
-        json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-        if json_match:
-            action_dict = json.loads(json_match.group(0))
-            return action_dict
-    except (json.JSONDecodeError, AttributeError):
-        pass
-
-    # Fallback: try to parse text-based response
-    if "SearchPolicy" in response_text:
-        query_match = re.search(r'query["\']?\s*[:\-]?\s*["\']([^"\']+)["\']', response_text)
-        return {
-            "action_type": "SearchPolicy",
-            "query": query_match.group(1) if query_match else "policy",
-        }
-    elif "RequestInformation" in response_text:
-        msg_match = re.search(r'message["\']?\s*[:\-]?\s*["\']([^"\']+)["\']', response_text)
-        return {
-            "action_type": "RequestInformation",
-            "message": msg_match.group(1) if msg_match else "Please provide missing information",
-        }
-    elif "ResolveTicket" in response_text:
-        decision = "Reject"
-        if "Approve" in response_text:
-            decision = "Approve"
-        elif "Escalate" in response_text:
-            decision = "Escalate"
-
-        reason_match = re.search(r'reason["\']?\s*[:\-]?\s*["\']([^"\']+)["\']', response_text)
-        return {
-            "action_type": "ResolveTicket",
-            "decision": decision,
-            "reason": reason_match.group(1) if reason_match else "Based on policy review",
-        }
-
-    return None
-
-
 def run_episode(
     client: Any,
     task_id: str,
@@ -226,7 +185,7 @@ def run_episode(
     for step in range(1, max_steps + 1):
         # Build prompt for LLM
         obs_dict = observation.model_dump() if hasattr(observation, 'model_dump') else observation.__dict__
-        user_prompt = build_user_prompt(obs_dict, task_id, step)
+        user_prompt = build_user_prompt(obs_dict, step)
 
         # Call LLM
         try:
@@ -247,15 +206,10 @@ def run_episode(
             )
             response_text = completion.choices[0].message.content or ""
         except Exception:
-            obs_dict = observation.model_dump() if hasattr(observation, 'model_dump') else observation.__dict__
-            action_dict = rule_based_fallback(obs_dict)
-            action_data = {
-                "action_type": action_dict.get("action_type", "ResolveTicket"),
-                "query": action_dict.get("query"),
-                "message": action_dict.get("message"),
-                "decision": action_dict.get("decision"),
-                "reason": action_dict.get("reason"),
-            }
+            obs_dict = observation.model_dump() if hasattr(observation, "model_dump") else observation.__dict__
+            action_data = parse_model_action(
+                json.dumps(rule_based_fallback(obs_dict)), obs_dict
+            )
             action = ComplianceAction(**action_data)
             step_result = client.step(action)
             observation = step_result.observation
@@ -271,19 +225,8 @@ def run_episode(
                 break
             continue
 
-        action_dict = parse_model_response(response_text)
-        if not action_dict:
-            action_dict = {"action_type": "ResolveTicket", "decision": "Reject", "reason": "Parse error"}
-
-
-        action_data = {
-            "action_type": action_dict.get("action_type", "ResolveTicket"),
-            "query": action_dict.get("query"),
-            "message": action_dict.get("message"),
-            "decision": action_dict.get("decision"),
-            "reason": action_dict.get("reason"),
-        }
-
+        obs_dict = observation.model_dump() if hasattr(observation, "model_dump") else observation.__dict__
+        action_data = parse_model_action(response_text, obs_dict)
         action = ComplianceAction(**action_data)
         step_result = client.step(action)
         observation = step_result.observation

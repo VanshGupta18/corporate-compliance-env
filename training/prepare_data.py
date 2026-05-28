@@ -159,7 +159,6 @@ def to_sft_format(records: List[StepRecord], terminal_only: bool = False) -> Lis
             continue
         prompt = (
             "You are an AI compliance officer. Return only valid action JSON.\n"
-            f"Task: {record.task_id}\n"
             f"Ticket: {json.dumps(record.observation, ensure_ascii=True)}"
         )
         rows.append(

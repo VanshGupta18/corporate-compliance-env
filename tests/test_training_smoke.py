@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -96,10 +97,11 @@ def test_build_step_prompt_no_leakage():
         "reward": 1.0,
         "done": False,
     }
-    prompt = build_step_prompt("medium", obs)
+    prompt = build_step_prompt(obs)
     assert "reward" not in prompt
     assert "done" not in prompt
-    assert "Task: medium" in prompt
+    assert "Task:" not in prompt
+    assert not re.search(r"Task:\s*(easy|medium|hard)", prompt, re.IGNORECASE)
 
 
 @pytest.mark.parametrize(

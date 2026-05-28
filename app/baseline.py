@@ -7,12 +7,15 @@ Uses WebSocket client (ComplianceEnvClient) for stateful multi-step episodes.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.client import ComplianceEnvClient
 from app.graders import grade_episode
 from app.models import ComplianceAction, ActionType, TicketDecision
+
+DEFAULT_COMPLIANCE_API = "https://mcqueenmater-env-corporate.hf.space"
 
 
 def _infer_required_document(observation: Dict[str, Any]) -> str:
@@ -42,7 +45,8 @@ def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
 class BaselineAgent:
     """Policy-based baseline agent implementing TechCorp India Expense Policy."""
 
-    def __init__(self, api_url: str = "http://localhost:7860"):
+    def __init__(self, api_url: str | None = None):
+        api_url = api_url or os.getenv("COMPLIANCE_API", DEFAULT_COMPLIANCE_API)
         self.api_url = api_url
         self._client: Optional[ComplianceEnvClient] = None
         self._sync = None
@@ -235,11 +239,16 @@ def main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(description="Run baseline on compliance claims.")
-    parser.add_argument("--api-url", default="http://127.0.0.1:7860")
+    parser.add_argument(
+        "--api-url",
+        default=os.getenv("COMPLIANCE_API", DEFAULT_COMPLIANCE_API),
+        help="Compliance environment API URL (default: COMPLIANCE_API or HF Space)",
+    )
     parser.add_argument("--split", default="test", choices=["train", "validation", "test", "all"])
     args = parser.parse_args()
 
     agent = BaselineAgent(api_url=args.api_url)
+    print(f"[BASELINE] Connecting to compliance environment: {args.api_url}")
     split_path = Path(f"data/splits/{args.split}.json")
     claims_path = Path("data/claims.json")
     if split_path.exists() and args.split != "all":

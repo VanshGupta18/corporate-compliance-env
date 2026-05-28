@@ -266,11 +266,12 @@ def parse_model_action(
 
 def render_compliance_prompt(
     tokenizer: Any,
-    task_id: str,
     observation: Dict[str, Any],
+    task_id: str | None = None,
 ) -> str:
     """Render chat-template prompt aligned with GRPO training."""
-    user_prompt = build_step_prompt(task_id, observation)
+    del task_id  # curriculum label is internal; not shown to the model
+    user_prompt = build_step_prompt(observation)
     messages = [
         {"role": "system", "content": COMPLIANCE_SYSTEM_PROMPT},
         {"role": "user", "content": user_prompt},
@@ -316,7 +317,7 @@ def extract_task_id(text: str, default: str = "easy") -> str:
     return match.group(1) if match else default
 
 
-def build_step_prompt(task_id: str, observation: Dict[str, Any]) -> str:
+def build_step_prompt(observation: Dict[str, Any]) -> str:
     clean = {
         k: observation[k]
         for k in (
@@ -350,7 +351,6 @@ def build_step_prompt(task_id: str, observation: Dict[str, Any]) -> str:
         extra += "\nYou are near max steps; resolve now unless a required document is still pending."
     return (
         "You are an AI compliance officer. Return only valid action JSON.\n"
-        f"Task: {task_id}\n"
         f"Ticket: {json.dumps(clean, ensure_ascii=True)}"
         f"{extra}"
     )
