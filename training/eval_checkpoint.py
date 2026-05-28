@@ -17,6 +17,16 @@ import torch
 
 from app.graders import grade_episode
 from app.models import ComplianceAction
+from app.paths import TRAINING_EPISODES, TRAINING_LOG, TRAINING_RESULTS
+from app.run_logging import (
+    append_episode_jsonl,
+    format_step_log,
+    log_claim_start,
+    log_episode_end,
+    log_episode_start,
+    run_with_log,
+    write_results_json,
+)
 from app.server.environment import ComplianceEnv
 from training.training_utils import (
     normalize_compliance_action,
@@ -163,22 +173,34 @@ def run_episode(
     tokenizer,
     task_id: str,
     claim: Optional[Dict[str, Any]] = None,
+    *,
+    log_to_stdout: bool = True,
 ) -> Dict[str, Any]:
     claim_id = claim["id"] if claim else None
+    if log_to_stdout and claim_id:
+        log_claim_start("training", claim_id, task_id)
+        log_episode_start(task_id, model="training-checkpoint")
     observation, done = runner.reset(task_id=task_id, claim_id=claim_id)
     steps = 0
     max_steps = int(observation.get("max_steps", 8))
     trajectory: List[Dict[str, Any]] = []
+    rewards: List[float] = []
 
     while not done and steps < max_steps:
         steps += 1
         action = generate_action(model, tokenizer, task_id, observation)
         observation, reward, done = runner.step(action, observation)
+        rewards.append(float(reward))
+        if log_to_stdout:
+            print(format_step_log(steps, action, reward, done), flush=True)
         trajectory.append(
             {
                 "step": steps,
                 "action_type": action.get("action_type"),
+                "query": action.get("query"),
+                "message": action.get("message"),
                 "decision": action.get("decision"),
+                "reason": action.get("reason"),
                 "reward": reward,
                 "done": done,
             }
@@ -217,19 +239,33 @@ def run_episode(
     )
     components = grader.get("components", {})
 
+    score = float(grader["score"])
+    success = bool(final_decision and str(final_decision) == str(gt))
+    if log_to_stdout:
+        log_episode_end(
+            steps=steps,
+            grader_score=score,
+            rewards=rewards,
+            success=success,
+        )
+
     return {
         "task_id": task_id,
         "claim_id": claim_id,
+        "rule_keyword": episode_claim.get("rule_keyword", ""),
         "steps": steps,
-        "grader_score": grader["score"],
+        "grader_score": score,
+        "score": score,
+        "success": success,
         "total_reward": sum(t["reward"] for t in trajectory),
         "done": done,
         "trajectory": trajectory,
+        "actions_history": actions_history,
         "ground_truth_decision": gt,
         "grader_components": components,
         "action_counts": action_counts,
         "final_decision": final_decision,
-        "decision_correct": bool(final_decision and str(final_decision) == str(gt)),
+        "decision_correct": success,
         "request_loop": loop_flag,
         "truncated_max_steps": bool(steps >= max_steps and not final_resolve),
         "required_document": required_document,
@@ -256,28 +292,7 @@ def load_baseline_scores(path: str) -> Dict[str, float]:
     }
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Evaluate LoRA checkpoint.")
-    parser.add_argument("--checkpoint", default="training/checkpoints/grpo")
-    parser.add_argument("--api-url", default="http://127.0.0.1:7860")
-    parser.add_argument(
-        "--local-env",
-        action="store_true",
-        default=True,
-        help="Use in-process ComplianceEnv (default; recommended for Colab).",
-    )
-    parser.add_argument(
-        "--use-remote-env",
-        action="store_true",
-        help="Evaluate via WebSocket server at --api-url.",
-    )
-    parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--split", default="validation")
-    parser.add_argument("--episode-log-file", default="training/logs/episodes.jsonl")
-    parser.add_argument("--baseline-file", default="baseline_results.json")
-    parser.add_argument("--clear-log", action="store_true")
-    args = parser.parse_args()
-
+def _run_eval(args: argparse.Namespace) -> None:
     log_path = Path(args.episode_log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     if args.clear_log and log_path.exists():
@@ -310,8 +325,7 @@ def main() -> None:
                     report[task_id].append(episode["grader_score"])
                     episode_metrics[task_id].append(episode)
                     episode["episode_index"] = episode_idx
-                    with log_path.open("a", encoding="utf-8") as handle:
-                        handle.write(json.dumps(episode, ensure_ascii=True) + "\n")
+                    append_episode_jsonl(log_path, episode)
     finally:
         if not use_local and isinstance(runners[0], WebSocketEnvRunner):
             runners[0].close()
@@ -356,6 +370,49 @@ def main() -> None:
     flat = [s for scores in report.values() for s in scores]
     if flat:
         print(f"overall_grader_mean={mean(flat):.3f}")
+
+    write_results_json(
+        Path(args.results_file),
+        report,
+        all_scores=flat,
+    )
+    print(f"[SAVED] {args.results_file}", flush=True)
+    print(f"[SAVED] episode log: {args.episode_log_file}", flush=True)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Evaluate LoRA checkpoint.")
+    parser.add_argument("--checkpoint", default="training/checkpoints/grpo")
+    parser.add_argument("--api-url", default="http://127.0.0.1:7860")
+    parser.add_argument(
+        "--local-env",
+        action="store_true",
+        default=True,
+        help="Use in-process ComplianceEnv (default; recommended for Colab).",
+    )
+    parser.add_argument(
+        "--use-remote-env",
+        action="store_true",
+        help="Evaluate via WebSocket server at --api-url.",
+    )
+    parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--split", default="validation")
+    parser.add_argument("--episode-log-file", default=str(TRAINING_EPISODES))
+    parser.add_argument("--results-file", default=str(TRAINING_RESULTS))
+    parser.add_argument("--run-log-file", default=str(TRAINING_LOG))
+    parser.add_argument("--baseline-file", default="baseline_results.json")
+    parser.add_argument("--clear-log", action="store_true")
+    parser.add_argument(
+        "--no-tee",
+        action="store_true",
+        help="Do not write training_run.log (stdout only).",
+    )
+    args = parser.parse_args()
+
+    if args.no_tee:
+        _run_eval(args)
+    else:
+        run_with_log(Path(args.run_log_file), lambda: _run_eval(args))
 
 
 if __name__ == "__main__":

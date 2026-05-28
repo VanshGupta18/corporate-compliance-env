@@ -15,15 +15,22 @@ import os
 import json
 import sys
 import textwrap
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Dict, Optional, Any
 
 from openai import OpenAI
 from app.client import ComplianceEnvClient
 from app.document_utils import infer_required_document
-from app.models import ComplianceAction, ComplianceObservation
 from app.graders import grade_episode
+from app.models import ComplianceAction, ComplianceObservation
+from app.paths import INFERENCE_LOG, INFERENCE_RESULTS
+from app.run_logging import (
+    format_step_log,
+    log_claim_start,
+    log_episode_start,
+    run_with_log,
+    write_results_json,
+)
 from training.training_utils import parse_model_action
 
 # ===== Environment Configuration =====
@@ -31,44 +38,6 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 API_KEY = os.getenv("HF_TOKEN")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
 COMPLIANCE_API = os.getenv("COMPLIANCE_API", "https://mcqueenmater-env-corporate.hf.space")
-
-
-class Tee:
-    """Write console output to both terminal and a log file."""
-
-    def __init__(self, *streams):
-        self.streams = streams
-
-    def write(self, data: str) -> int:
-        for stream in self.streams:
-            stream.write(data)
-            stream.flush()
-        return len(data)
-
-    def flush(self) -> None:
-        for stream in self.streams:
-            stream.flush()
-
-def _format_step_log(step: int, action: ComplianceAction, reward: float, done: bool) -> str:
-    """Structured step line so the dashboard can show policy queries and decisions."""
-    parts = [
-        f"[STEP] step={step}",
-        f"action={action.action_type}",
-        f"reward={reward:.2f}",
-        f"done={str(done).lower()}",
-    ]
-    if action.query:
-        q = str(action.query).replace('"', "'")
-        parts.append(f'query="{q}"')
-    if action.message:
-        m = str(action.message).replace('"', "'")
-        parts.append(f'message="{m}"')
-    if action.decision is not None:
-        parts.append(f"decision={action.decision}")
-    if action.reason:
-        r = str(action.reason).replace('"', "'")[:120]
-        parts.append(f'reason="{r}"')
-    return " ".join(parts)
 
 
 # ===== Task Configuration =====
@@ -236,7 +205,7 @@ def run_episode(
     claim: Optional[Dict[str, Any]] = None,
 ) -> Dict:
     """Run a single episode on the given task (difficulty), optionally pinned to a claim."""
-    print(f"[START] task={task_id.upper()} env=corporate-compliance-env model={MODEL_NAME}", flush=True)
+    log_episode_start(task_id, model=MODEL_NAME)
 
     reset_kwargs: Dict[str, Any] = {"task_id": task_id}
     if claim_id:
@@ -287,7 +256,7 @@ def run_episode(
             observation = step_result.observation
             reward = step_result.reward or 0.0
             
-            print(_format_step_log(step, action, reward, step_result.done), flush=True)
+            print(format_step_log(step, action.model_dump(), reward, step_result.done), flush=True)
 
             action_data["reward"] = reward
             episode_data["steps"].append(action_data)
@@ -304,7 +273,7 @@ def run_episode(
         observation = step_result.observation
         reward = step_result.reward or 0.0
 
-        print(_format_step_log(step, action, reward, step_result.done), flush=True)
+        print(format_step_log(step, action.model_dump(), reward, step_result.done), flush=True)
 
         action_data["reward"] = reward
         episode_data["steps"].append(action_data)
@@ -367,7 +336,7 @@ def main() -> None:
                 claim_id = claim["id"]
                 difficulty = claim["task_difficulty"]
 
-                print(f"Running inference for claim {claim_id} ({difficulty})...")
+                log_claim_start("inference", claim_id, difficulty)
                 episode_data = run_episode(client, difficulty, claim_id=claim_id, claim=claim)
 
                 grader_result = grade_episode(
@@ -394,9 +363,7 @@ def main() -> None:
                 "total": len(scores),
             }
 
-        results_payload = {"metrics": metrics}
-        with open("inference_results.json", "w", encoding="utf-8") as f:
-            json.dump(results_payload, f, indent=2)
+        write_results_json(INFERENCE_RESULTS, results_by_diff, all_scores=all_scores)
 
         print("\n[SUMMARY] Inference Results:", flush=True)
         print(
@@ -415,9 +382,5 @@ def main() -> None:
         traceback.print_exc()
 
 if __name__ == "__main__":
-    log_path = Path(os.getenv("INFERENCE_LOG_PATH", "inference_run.log"))
-    with open(log_path, "w", encoding="utf-8") as log_file:
-        tee = Tee(sys.stdout, log_file)
-        with redirect_stdout(tee), redirect_stderr(tee):
-            print(f"[LOG] Writing inference log to {log_path}")
-            main()
+    log_path = Path(os.getenv("INFERENCE_LOG_PATH", str(INFERENCE_LOG)))
+    run_with_log(log_path, main)

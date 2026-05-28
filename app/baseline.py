@@ -6,10 +6,8 @@ Uses WebSocket client (ComplianceEnvClient) for stateful multi-step episodes.
 
 from __future__ import annotations
 
-import json
 import os
 import sys
-from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -17,25 +15,17 @@ from app.client import ComplianceEnvClient
 from app.document_utils import infer_required_document as _infer_required_document
 from app.graders import grade_episode
 from app.models import ComplianceAction, ActionType, TicketDecision
+from app.paths import BASELINE_LOG, BASELINE_RESULTS
+from app.run_logging import (
+    format_step_log,
+    log_claim_start,
+    log_episode_end,
+    log_episode_start,
+    run_with_log,
+    write_results_json,
+)
 
 DEFAULT_COMPLIANCE_API = "https://mcqueenmater-env-corporate.hf.space"
-
-
-class Tee:
-    """Write console output to both terminal and a log file."""
-
-    def __init__(self, *streams):
-        self.streams = streams
-
-    def write(self, data: str) -> int:
-        for stream in self.streams:
-            stream.write(data)
-            stream.flush()
-        return len(data)
-
-    def flush(self) -> None:
-        for stream in self.streams:
-            stream.flush()
 
 
 def _normalize_action(action: Dict[str, Any]) -> Dict[str, Any]:
@@ -188,10 +178,7 @@ class BaselineAgent:
         claim: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """Run one full episode via WebSocket client."""
-        print(
-            f"[START] task={task_id.upper()} env=corporate-compliance-env model=baseline-agent",
-            flush=True,
-        )
+        log_episode_start(task_id, model="baseline-agent")
 
         reset_kwargs: Dict[str, Any] = {"task_id": task_id}
         if claim_id:
@@ -215,24 +202,7 @@ class BaselineAgent:
                 done = step_result.done
                 total_reward += reward
                 rewards.append(reward)
-                parts = [
-                    f"[STEP] step={step_count}",
-                    f"action={action_dict['action_type']}",
-                    f"reward={reward:.2f}",
-                    f"done={str(done).lower()}",
-                ]
-                if action_dict.get("query"):
-                    q = str(action_dict["query"]).replace('"', "'")
-                    parts.append(f'query="{q}"')
-                if action_dict.get("message"):
-                    m = str(action_dict["message"]).replace('"', "'")
-                    parts.append(f'message="{m}"')
-                if action_dict.get("decision"):
-                    parts.append(f"decision={action_dict['decision']}")
-                if action_dict.get("reason"):
-                    r = str(action_dict["reason"]).replace('"', "'")[:120]
-                    parts.append(f'reason="{r}"')
-                print(" ".join(parts), flush=True)
+                print(format_step_log(step_count, action_dict, reward, done), flush=True)
 
             state = client.state()
             actions_history = getattr(state, "actions_history", []) or []
@@ -243,10 +213,13 @@ class BaselineAgent:
             ground_truth_decision=(claim or {}).get("ground_truth_decision", "Approve"),
             claim=claim,
         )
-        score = grader["score"]
-        print(
-            f"[END] steps={step_count} grader_score={score:.3f} total_reward={total_reward:.3f}",
-            flush=True,
+        score = float(grader["score"])
+        correct = float(grader.get("components", {}).get("correct_decision", 0.0)) > 0
+        log_episode_end(
+            steps=step_count,
+            grader_score=score,
+            rewards=rewards,
+            success=bool(done and correct),
         )
         return {
             "task_id": task_id,
@@ -287,7 +260,7 @@ def main() -> None:
 
     for claim in claims:
         difficulty = claim["task_difficulty"]
-        print(f"Running baseline for claim {claim['id']} ({difficulty})...", flush=True)
+        log_claim_start("baseline", claim["id"], difficulty)
         try:
             result = agent.run_episode(
                 task_id=difficulty,
@@ -315,8 +288,7 @@ def main() -> None:
             "total": len(scores),
         }
 
-    with open("baseline_results.json", "w", encoding="utf-8") as f:
-        json.dump(metrics, f, indent=2)
+    write_results_json(BASELINE_RESULTS, results_by_diff, all_scores=all_scores)
 
     print("\n[SUMMARY] Baseline Results:")
     print(
@@ -329,9 +301,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    log_path = Path(os.getenv("BASELINE_LOG_PATH", "baseline_run.log"))
-    with open(log_path, "w", encoding="utf-8") as log_file:
-        tee = Tee(sys.stdout, log_file)
-        with redirect_stdout(tee), redirect_stderr(tee):
-            print(f"[LOG] Writing baseline log to {log_path}")
-            main()
+    log_path = Path(os.getenv("BASELINE_LOG_PATH", str(BASELINE_LOG)))
+    run_with_log(log_path, main)

@@ -18,17 +18,20 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import gradio as gr
 
+from app.paths import (
+    ARTIFACT_ROOT,
+    BASELINE_LOG,
+    BASELINE_RESULTS,
+    CLAIMS_DATA,
+    INFERENCE_LOG,
+    INFERENCE_RESULTS,
+    TEST_SPLIT,
+    TRAINING_EPISODES,
+    TRAINING_LEARNING_CURVE,
+    TRAINING_LOG,
+    TRAINING_RESULTS,
+)
 from app.policy_snippets import POLICY_SNIPPETS, match_policy_snippet
-
-# ── File paths ─────────────────────────────────────────────────────────────────
-
-BASELINE_RESULTS = Path("baseline_results.json")
-INFERENCE_RESULTS = Path("inference_results.json")
-BASELINE_LOG = Path("baseline_run.log")
-INFERENCE_LOG = Path("inference_run.log")
-TRAINING_EPISODES = Path("training/logs/episodes.jsonl")
-CLAIMS_DATA = Path("data/claims.json")
-TEST_SPLIT = Path("data/splits/test.json")
 
 _CLAIM_RUN_RE = re.compile(
     r"Running (?:inference|baseline) for claim\s+([A-Z0-9-]+)\s+\((easy|medium|hard)\)\.\.\.",
@@ -271,6 +274,8 @@ def _parse_episode_log(path: Path, method: str) -> Tuple[List[Dict], List[Dict]]
 
         sm = re.match(r"\[START\]\s+task=(EASY|MEDIUM|HARD)\s+.*", line)
         if sm:
+            if current is not None:
+                episodes.append(current)
             episode_idx += 1
             task_from_start = sm.group(1).lower()
             if not current_claim and method == "baseline" and claim_queue:
@@ -319,10 +324,18 @@ def _parse_episode_log(path: Path, method: str) -> Tuple[List[Dict], List[Dict]]
             r"\[END\]\s+(?:success=(true|false)\s+)?steps=(\d+)\s+(?:score|grader_score)=([0-9.]+)",
             line,
         )
-        if end_m:
-            current["success"] = end_m.group(1) == "true" if end_m.group(1) else False
-            current["steps"] = int(end_m.group(2))
-            current["grader_score"] = float(end_m.group(3))
+        end_legacy = None
+        if not end_m:
+            end_legacy = re.match(r"\[END\]\s+steps=(\d+)\s+grader_score=([0-9.]+)", line)
+        if end_m or end_legacy:
+            if end_m:
+                current["success"] = end_m.group(1) == "true" if end_m.group(1) else False
+                current["steps"] = int(end_m.group(2))
+                current["grader_score"] = float(end_m.group(3))
+            else:
+                current["success"] = False
+                current["steps"] = int(end_legacy.group(1))
+                current["grader_score"] = float(end_legacy.group(2))
             episodes.append(current)
             current = None
             current_claim = None
@@ -350,8 +363,9 @@ def _training_frames(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]
             "grader_score": float(score or 0.0),
             "success": bool(row.get("success", False)),
         })
-        history = row.get("actions_history", row.get("actions", []))
-        if isinstance(history, list):
+        history = row.get("actions_history") or row.get("actions") or []
+        trajectory = row.get("trajectory") or []
+        if isinstance(history, list) and history:
             for si, action in enumerate(history, start=1):
                 p = action if isinstance(action, dict) else {"action_type": str(action)}
                 p = {**p, "_rule_keyword": row.get("rule_keyword", "")}
@@ -363,6 +377,28 @@ def _training_frames(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]
                     "step": si,
                     "reward": float(p.get("reward", 0.0) or 0.0),
                     "done": bool(p.get("done", False)),
+                    **fields,
+                })
+        elif isinstance(trajectory, list):
+            for step_row in trajectory:
+                if not isinstance(step_row, dict):
+                    continue
+                p = {
+                    "action_type": step_row.get("action_type", ""),
+                    "decision": step_row.get("decision"),
+                    "query": step_row.get("query"),
+                    "message": step_row.get("message"),
+                    "reason": step_row.get("reason"),
+                    "_rule_keyword": row.get("rule_keyword", ""),
+                }
+                fields = _action_fields_from_dict(p)
+                actions.append({
+                    "method": "training",
+                    "episode_id": ep_id,
+                    "task_id": task,
+                    "step": int(step_row.get("step", 0) or 0),
+                    "reward": float(step_row.get("reward", 0.0) or 0.0),
+                    "done": bool(step_row.get("done", False)),
                     **fields,
                 })
     return episodes, actions
@@ -445,11 +481,17 @@ def _enrich_action_policies(episodes: List[Dict[str, Any]], actions: List[Dict[s
 def _load_dashboard_data() -> Dict[str, Any]:
     baseline = _load_metrics(BASELINE_RESULTS, "baseline")
     inference = _load_metrics(INFERENCE_RESULTS, "inference")
+    training_metrics_file = _load_metrics(TRAINING_RESULTS, "training")
     b_eps, b_acts = _parse_episode_log(BASELINE_LOG, "baseline")
     i_eps, i_acts = _parse_episode_log(INFERENCE_LOG, "inference")
+    t_log_eps, t_log_acts = _parse_episode_log(TRAINING_LOG, "training")
     training_rows = _read_jsonl(TRAINING_EPISODES, last_n=800)
     training = _training_metrics(training_rows)
+    if training.total == 0 and training_metrics_file.total > 0:
+        training = training_metrics_file
     t_eps, t_acts = _training_frames(training_rows)
+    if not t_eps and t_log_eps:
+        t_eps, t_acts = t_log_eps, t_log_acts
 
     claims_idx = _load_claims_index()
     all_eps = _enrich_episodes(b_eps + i_eps + t_eps, claims_idx)
@@ -461,8 +503,25 @@ def _load_dashboard_data() -> Dict[str, Any]:
         for idx, r in enumerate(training_rows, 1)
         if r.get("grader_score", r.get("score")) is not None
     ]
+    if not learning and TRAINING_LEARNING_CURVE.exists():
+        for idx, row in enumerate(_read_jsonl(TRAINING_LEARNING_CURVE, last_n=400), 1):
+            per = row.get("per_difficulty") or {}
+            scores = [
+                float(per[t].get("mean_grader_score", 0.0) or 0.0)
+                for t in TASK_ORDER
+                if isinstance(per.get(t), dict)
+            ]
+            if scores:
+                learning.append(
+                    {
+                        "episode": idx,
+                        "grader_score": sum(scores) / len(scores),
+                        "step": row.get("global_step", idx),
+                    }
+                )
 
     return {
+        "artifact_root": str(ARTIFACT_ROOT),
         "metrics": {
             "baseline": {
                 "overall": baseline.overall,
@@ -574,9 +633,6 @@ a{color:var(--blue);text-decoration:none}
 .curr-meta{font-size:11px;color:var(--muted);white-space:nowrap}
 .curr-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin:10px 0 4px}
 .curr-txt{font-size:12px;color:#c7d2de;line-height:1.55}
-.curr-scores{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)}
-.curr-score{font-size:11px;padding:3px 8px;border-radius:6px;background:rgba(0,0,0,.25);color:var(--muted)}
-.curr-score b{color:var(--text);font-weight:700}
 
 /* Section header */
 .sec-hd{margin:28px 0 14px}
@@ -847,7 +903,7 @@ function App(){
       :h('div',{className:'replay-empty'},
         filtEps.length
           ?'Pick Easy / Medium / Hard and Baseline / Inference / Train, then click Random episode.'
-          :'No episodes for this filter yet. Re-run baseline or inference logs.'),
+          :'No episodes for this filter. Run baseline/inference/training eval locally, then open /dashboard on the same machine (artifact root: '+(D.artifact_root||'?')+').'),
     h(PolicyRulebook,{highlighted:highlightedRule}),
     learning.length>0?h(LearnCurve,null):null
   );
@@ -886,16 +942,14 @@ function KPICard({lbl,val,color,sub}){
 }
 
 function TaskCurriculum(){
-  const fmt=v=>v!=null?Number(v).toFixed(3):'—';
   return h('div',{className:'curriculum-section'},
     h('div',{className:'sec-hd',style:{marginTop:0}},
       h('h2',null,'Task curriculum: Easy, Medium, Hard'),
-      h('p',null,'Each expense claim is labeled with a difficulty. Agents face different information and step budgets — this is why benchmark scores drop from Easy to Hard.')
+      h('p',null,'Each expense claim is labeled with a difficulty. Agents face different information and step budgets across Easy, Medium, and Hard.')
     ),
     h('div',{className:'curriculum-grid'},
-      ...curriculum.map(task=>{
-        const b=M.baseline||{},inf=M.inference||{};
-        return h('div',{key:task.id,className:'curriculum-card '+task.id},
+      ...curriculum.map(task=>
+        h('div',{key:task.id,className:'curriculum-card '+task.id},
           h('div',{className:'curr-hdr'},
             h('div',{className:'curr-title'},task.title),
             h('span',{className:'curr-meta'},'max '+task.max_steps+' steps \xb7 '+task.expected_steps)
@@ -905,13 +959,9 @@ function TaskCurriculum(){
           h('div',{className:'curr-lbl'},'What the agent should do'),
           h('div',{className:'curr-txt'},task.agent_goal),
           h('div',{className:'curr-lbl'},'Why it is still tricky'),
-          h('div',{className:'curr-txt'},task.why_hard),
-          h('div',{className:'curr-scores'},
-            h('span',{className:'curr-score'},'Baseline ',h('b',null,fmt(b[task.id]))),
-            h('span',{className:'curr-score'},'LLM ',h('b',null,fmt(inf[task.id])))
-          )
-        );
-      })
+          h('div',{className:'curr-txt'},task.why_hard)
+        )
+      )
     )
   );
 }
@@ -1164,7 +1214,7 @@ catch(e){document.getElementById('root').innerHTML='<div style="padding:40px;col
 
 # ── Cache ──────────────────────────────────────────────────────────────────────
 _cache: tuple[str, float] = ("", 0.0)
-_CACHE_TTL = 30.0
+_CACHE_TTL = 5.0
 
 
 def _render_dashboard() -> str:
