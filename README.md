@@ -41,7 +41,7 @@ exactly that — understand a request, retrieve the relevant policy
 rule, and make a compliant decision.
 
 This mirrors real production systems used at companies like Ramp,
-Concur, and SAP — but is the **first open-source RL training
+Concur, and SAP — but is the **open-source RL training
 environment for this domain**. It is grounded in Indian corporate
 compliance norms: ₹-denominated limits, GST receipt requirements,
 WFH allowances, and local travel policies (auto-rickshaw, cab, metro).
@@ -85,19 +85,27 @@ The agent can also:
 
 ---
 
-## 🏆 Baseline Performance
+## 🏆 Performance
 
-| Difficulty | Task | Post-RL target (GRPO) | Rule-based baseline |
-|---|---|---|---|
-| Easy | Single-step classification | 0.85–0.99 | ~0.78 |
-| Medium | Policy retrieval | 0.60–0.90 | ~0.61 |
-| Hard | Multi-turn contextual | 0.40–0.75 | ~0.34 |
+Current test-set results use 120 held-out claims: 40 easy, 40 medium, and 40 hard.
+
+| Method | Overall | Easy | Medium | Hard |
+|---|---:|---:|---:|---:|
+| Rule Baseline | 0.717 | 0.909 | 0.713 | 0.528 |
+| Generic LLM | 0.716 | 0.882 | 0.713 | 0.553 |
+| Trained LLM | 0.713 | 0.801 | 0.750 | 0.588 |
+
+The overall score is nearly tied, but the trained model improves on the harder
+workflow-heavy cases: **+0.037 on Medium**, **+0.035 on Hard**, and **+0.036 on
+Medium+Hard average** versus the generic LLM. It also uses the right tools more
+often after training: `SearchPolicy` rises from 53 to 78 actions, and
+`RequestInformation` rises from 29 to 40 actions in eval logs.
 
 Curriculum bands are defined in [`app/curriculum_targets.py`](app/curriculum_targets.py) and [`openenv.yaml`](openenv.yaml).
 
 ---
 
-## 🚀 Quick Start
+
 
 ### Use the Live Space
 
@@ -113,7 +121,7 @@ pip install -r requirements.txt
 
 uvicorn app.server.app:app --host 0.0.0.0 --port 7860
 # API docs: http://localhost:7860/docs
-# Dashboard: http://localhost:7860/demo
+# Dashboard: http://localhost:7860/dashboard
 
 openenv validate --url http://localhost:7860 --verbose
 pytest tests/ -q
@@ -123,14 +131,16 @@ pytest tests/ -q
 
 ```bash
 python app/baseline.py          # uses COMPLIANCE_API or the default HF Space
-python inference.py             # writes inference_results.json (gitignored)
+python inference.py             # writes inference_run.log + inference_results.json
+python -m training.eval_checkpoint --split test
+# writes training_run.log, training_results.json, and episodes.jsonl
 ```
 
 ### Train on Google Colab (Unsloth SFT + GRPO)
 
 **Notebook:** [`notebooks/Colab_T4_Training.ipynb`](notebooks/Colab_T4_Training.ipynb) — in Colab use *File → Open notebook → GitHub* and pick your fork, or upload the notebook. Set **Runtime → T4 GPU**, then set `GITHUB_USER` in the first code cell.
 
-See **[`TRAINING.md`](TRAINING.md)** for the same pipeline as copy-paste cells.
+---
 
 ### Docker
 
@@ -156,7 +166,8 @@ See [`Dockerfile`](Dockerfile) and [`openenv.yaml`](openenv.yaml) for container 
 | `/grader` | POST | Get final score for completed episode |
 | `/baseline` | POST | Run baseline agent on all 3 tasks |
 | `/docs` | GET | Swagger interactive API documentation |
-| `/demo` | GET | Gradio live demo dashboard |
+| `/dashboard` | GET | React benchmark dashboard |
+| `/demo` | GET | Minimal Gradio wrapper |
 
 ---
 
@@ -208,7 +219,10 @@ meta-openenv/
 └── requirements.txt
 ```
 
-Generated at runtime (gitignored): `baseline_results.json`, `inference_results.json`, `training/data/`, `training/logs/`, `training/checkpoints/`.
+Generated at runtime: `baseline_run.log`, `baseline_results.json`,
+`inference_run.log`, `inference_results.json`, `training_run.log`,
+`training_results.json`, `episodes.jsonl`, `training/data/`, `training/logs/`,
+and `training/checkpoints/`.
 
 ---
 
@@ -495,34 +509,7 @@ OpenEnv creates a fresh environment for each HTTP request. Keep a WebSocket open
   }
 }
 ```
-
-### `/baseline` response
-
-```json
-{
-  "easy":   0.78,
-  "medium": 0.61,
-  "hard":   0.34,
-  "average": 0.577
-}
-```
-
----
-
-## ⚙️ OpenEnv Spec Compliance
-
-| Interface | Return Type | Status |
-|-----------|-------------|--------|
-| `reset()` | `ComplianceObservation` | ✅ |
-| `step(action)` | `obs, reward, done, info` | ✅ |
-| `state()` | `ComplianceState` | ✅ |
-| `openenv.yaml` | Metadata + task list | ✅ |
-| `openenv validate` | All checks pass | ✅ |
-| `/tasks` endpoint | Task list + action schema | ✅ |
-| `/grader` endpoint | Score 0.0–1.0 | ✅ |
-| `/baseline` endpoint | Scores for all 3 tasks | ✅ |
-
----
+--- 
 
 ## 📈 Why This Environment Matters
 
@@ -534,21 +521,13 @@ enterprise expense auditing without proprietary data.
 
 Because the policy document is a plain `policy.md` file, **any
 company can drop in their own rulebook** — making this a general
-framework, not just a demo. A well-trained agent on this environment
-can handle ~70% of routine compliance decisions autonomously.
+framework, not just a demo. A small SFT + GRPO run already shifts the
+model toward the behavior compliance teams need: searching policy,
+asking for missing evidence, and improving on medium/hard tickets even
+when overall average remains close to the generic LLM.
 
 ---
 
 *Built for the Meta Hackathon 2026.*
 
----
-
-## 🧪 Training Pipeline (SFT + GRPO)
-
-Colab runbook: [`TRAINING.md`](TRAINING.md). Quick checks:
-
-```bash
-python training/smoke_test.py
-python -m training.sft_train --dry-run
-python -m training.grpo_train --dry-run
-```
+--
