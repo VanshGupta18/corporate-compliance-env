@@ -13,7 +13,10 @@ MANDATORY
 
 import os
 import json
+import sys
 import textwrap
+from contextlib import redirect_stderr, redirect_stdout
+from pathlib import Path
 from typing import Dict, Optional, Any
 
 from openai import OpenAI
@@ -27,6 +30,23 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 API_KEY = os.getenv("HF_TOKEN")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
 COMPLIANCE_API = os.getenv("COMPLIANCE_API", "https://mcqueenmater-env-corporate.hf.space")
+
+
+class Tee:
+    """Write console output to both terminal and a log file."""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data: str) -> int:
+        for stream in self.streams:
+            stream.write(data)
+            stream.flush()
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self.streams:
+            stream.flush()
 
 # ===== Task Configuration =====
 TASKS = ["easy", "medium", "hard"]
@@ -333,5 +353,9 @@ def main() -> None:
         traceback.print_exc()
 
 if __name__ == "__main__":
-    from pathlib import Path
-    main()
+    log_path = Path(os.getenv("INFERENCE_LOG_PATH", "inference_run.log"))
+    with open(log_path, "w", encoding="utf-8") as log_file:
+        tee = Tee(sys.stdout, log_file)
+        with redirect_stdout(tee), redirect_stderr(tee):
+            print(f"[LOG] Writing inference log to {log_path}")
+            main()

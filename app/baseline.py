@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -16,6 +18,23 @@ from app.graders import grade_episode
 from app.models import ComplianceAction, ActionType, TicketDecision
 
 DEFAULT_COMPLIANCE_API = "https://mcqueenmater-env-corporate.hf.space"
+
+
+class Tee:
+    """Write console output to both terminal and a log file."""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data: str) -> int:
+        for stream in self.streams:
+            stream.write(data)
+            stream.flush()
+        return len(data)
+
+    def flush(self) -> None:
+        for stream in self.streams:
+            stream.flush()
 
 
 def _infer_required_document(observation: Dict[str, Any]) -> str:
@@ -304,4 +323,9 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    log_path = Path(os.getenv("BASELINE_LOG_PATH", "baseline_run.log"))
+    with open(log_path, "w", encoding="utf-8") as log_file:
+        tee = Tee(sys.stdout, log_file)
+        with redirect_stdout(tee), redirect_stderr(tee):
+            print(f"[LOG] Writing baseline log to {log_path}")
+            main()

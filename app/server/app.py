@@ -57,7 +57,7 @@ async def root(request: Request):
     """Root endpoint for platform readiness checks and docs discovery."""
     accept = request.headers.get("accept", "")
     if "text/html" in accept:
-        return RedirectResponse(url="/docs", status_code=307)
+        return RedirectResponse(url="/demo", status_code=307)
 
     return RootResponse(
         status="ok",
