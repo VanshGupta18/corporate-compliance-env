@@ -41,10 +41,7 @@ coverage.xml
 Thumbs.db
 
 # ── Logs ─────────────────────────────────────────────
-*.log
-!baseline_run.log
-!inference_run.log
-!training_run.log
+
 logs/
 *.out
 
@@ -77,10 +74,11 @@ data/temp_*.json
 !baseline_results.json
 !inference_results.json
 !training_results.json
+
 training/data/
 training/logs/
 training/checkpoints/
-*.jsonl
+
 !data/splits/*.json
 
 # ── MyPy / Type checking ──────────────────────────────

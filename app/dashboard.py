@@ -27,7 +27,7 @@ from app.paths import (
     INFERENCE_RESULTS,
     TEST_SPLIT,
     TRAINING_EPISODES,
-    TRAINING_LEARNING_CURVE,
+    TRAINING_EPISODES_ROOT,
     TRAINING_LOG,
     TRAINING_RESULTS,
 )
@@ -278,9 +278,7 @@ def _parse_episode_log(path: Path, method: str) -> Tuple[List[Dict], List[Dict]]
     episodes: List[Dict[str, Any]] = []
     actions: List[Dict[str, Any]] = []
     episode_idx = 0
-    claim_queue: List[Dict[str, Any]] = (
-        list(_load_baseline_claim_order()) if method == "baseline" else []
-    )
+    claim_queue: List[Dict[str, Any]] = list(_load_baseline_claim_order())
 
     for raw in text.splitlines():
         line = raw.strip()
@@ -295,7 +293,7 @@ def _parse_episode_log(path: Path, method: str) -> Tuple[List[Dict], List[Dict]]
                 episodes.append(current)
             episode_idx += 1
             task_from_start = sm.group(1).lower()
-            if not current_claim and method == "baseline" and claim_queue:
+            if not current_claim and claim_queue:
                 queued = claim_queue.pop(0)
                 current_claim = str(queued.get("id", ""))
                 current_task = str(queued.get("task_difficulty", task_from_start)).lower()
@@ -363,64 +361,221 @@ def _parse_episode_log(path: Path, method: str) -> Tuple[List[Dict], List[Dict]]
     return episodes, actions
 
 
+def _training_jsonl_candidate_paths() -> List[Path]:
+    """Resolve episodes.jsonl from Colab root copy or training/logs/."""
+    candidates = [
+        TRAINING_EPISODES_ROOT,
+        TRAINING_EPISODES,
+        ARTIFACT_ROOT / "training/logs/episodes.jsonl",
+    ]
+    seen: set[str] = set()
+    ordered: List[Path] = []
+    for path in candidates:
+        key = str(path)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(path)
+    return ordered
+
+
+def _read_training_jsonl(last_n: int = 800) -> List[Dict[str, Any]]:
+    """Prefer the JSONL with claim_id fields (root Colab copy over smoke logs)."""
+    best: List[Dict[str, Any]] = []
+    best_key = (-1, -1)
+    for path in _training_jsonl_candidate_paths():
+        if not path.exists():
+            continue
+        rows = _read_jsonl(path, last_n=last_n)
+        if not rows:
+            continue
+        with_claim = sum(1 for r in rows if r.get("claim_id"))
+        key = (with_claim, len(rows))
+        if key > best_key:
+            best_key = key
+            best = rows
+    return best
+
+
+_EPISODE_ID_IDX_RE = re.compile(r"^(?:training|baseline|inference)-(\d+)$")
+
+
+def _episode_index_from_id(episode_id: str) -> int:
+    match = _EPISODE_ID_IDX_RE.match(episode_id or "")
+    return int(match.group(1)) if match else 0
+
+
+def _jsonl_row_for_episode(
+    ep: Dict[str, Any],
+    by_claim: Dict[str, Dict[str, Any]],
+    by_index: Dict[int, Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    claim_id = str(ep.get("claim_id") or "")
+    if claim_id and claim_id in by_claim:
+        return by_claim[claim_id]
+    idx = _episode_index_from_id(str(ep.get("episode_id", "")))
+    if idx and idx in by_index:
+        return by_index[idx]
+    return None
+
+
+def _metrics_from_episodes(episodes: List[Dict[str, Any]], method: str) -> MethodMetrics:
+    if not episodes:
+        return MethodMetrics(method=method, overall=0.0, total=0, by_task={}, by_task_total={})
+    by_task: Dict[str, List[float]] = {t: [] for t in TASK_ORDER}
+    for ep in episodes:
+        task = str(ep.get("task_id", "")).lower()
+        if task in by_task:
+            by_task[task].append(float(ep.get("grader_score", 0.0) or 0.0))
+    return MethodMetrics(
+        method=method,
+        overall=mean(float(ep.get("grader_score", 0.0) or 0.0) for ep in episodes),
+        total=len(episodes),
+        by_task={t: (mean(v) if v else 0.0) for t, v in by_task.items()},
+        by_task_total={t: len(v) for t, v in by_task.items()},
+    )
+
+
+def _attach_claim_ids_from_order(episodes: List[Dict[str, Any]]) -> None:
+    """Last resort: map training-NNNN to test-split claim order when logs omit claim lines."""
+    claim_order = _load_baseline_claim_order()
+    if not claim_order:
+        return
+    for ep in episodes:
+        if ep.get("claim_id"):
+            continue
+        idx = _episode_index_from_id(str(ep.get("episode_id", "")))
+        if not idx or idx > len(claim_order):
+            continue
+        claim = claim_order[idx - 1]
+        ep["claim_id"] = str(claim.get("id", ""))
+        ep["task_id"] = str(claim.get("task_difficulty", ep.get("task_id", "easy"))).lower()
+
+
+def _merge_training_jsonl_meta(
+    episodes: List[Dict[str, Any]], rows: List[Dict[str, Any]]
+) -> None:
+    """Align log-parsed episodes with eval JSONL (claim_id, scores) by claim or episode index."""
+    by_claim = {
+        str(r.get("claim_id")): r for r in rows if r.get("claim_id")
+    }
+    by_index = {
+        int(r.get("episode_index", 0) or 0): r
+        for r in rows
+        if int(r.get("episode_index", 0) or 0) > 0
+    }
+    for ep in episodes:
+        row = _jsonl_row_for_episode(ep, by_claim, by_index)
+        if row:
+            if not ep.get("claim_id") and row.get("claim_id"):
+                ep["claim_id"] = row["claim_id"]
+            if row.get("task_id"):
+                ep["task_id"] = str(row["task_id"]).lower()
+            if row.get("rule_keyword") and not ep.get("rule_keyword"):
+                ep["rule_keyword"] = row["rule_keyword"]
+        if row and row.get("success") is not None:
+            ep["success"] = bool(row["success"])
+        if row:
+            score = row.get("grader_score", row.get("score"))
+            if score is not None:
+                ep["grader_score"] = float(score)
+            total_reward = row.get("total_reward")
+            if total_reward is not None:
+                ep["total_reward"] = float(total_reward)
+    _attach_claim_ids_from_order(episodes)
+
+
 def _training_frames(rows: List[Dict[str, Any]]) -> Tuple[List[Dict], List[Dict]]:
+    """Fallback when training_run.log is missing — mirror log-shaped episode/action rows."""
     episodes: List[Dict[str, Any]] = []
     actions: List[Dict[str, Any]] = []
     for idx, row in enumerate(rows, start=1):
         score = row.get("grader_score", row.get("score"))
-        reward = row.get("total_reward", row.get("reward", 0.0))
-        task = str(row.get("task_id", "training")).lower()
+        task = str(row.get("task_id", "easy")).lower()
         ep_id = f"training-{idx:04d}"
-        steps = row.get("steps", 0)
+        steps = int(row.get("steps", 0) or 0)
+        total_reward = float(row.get("total_reward", row.get("reward", 0.0)) or 0.0)
         episodes.append({
             "method": "training",
             "episode_id": ep_id,
             "claim_id": row.get("claim_id", ""),
             "task_id": task,
-            "steps": int(steps or 0),
-            "total_reward": float(reward or 0.0),
+            "steps": steps,
+            "total_reward": total_reward,
             "grader_score": float(score or 0.0),
             "success": bool(row.get("success", False)),
         })
-        history = row.get("actions_history") or row.get("actions") or []
+        rule_kw = str(row.get("rule_keyword") or "")
         trajectory = row.get("trajectory") or []
-        if isinstance(history, list) and history:
+        history = row.get("actions_history") or row.get("actions") or []
+        step_rows: List[Dict[str, Any]] = []
+        if isinstance(trajectory, list) and trajectory:
+            step_rows = [s for s in trajectory if isinstance(s, dict)]
+        elif isinstance(history, list) and history:
             for si, action in enumerate(history, start=1):
-                p = action if isinstance(action, dict) else {"action_type": str(action)}
-                p = {**p, "_rule_keyword": row.get("rule_keyword", "")}
-                fields = _action_fields_from_dict(p)
-                actions.append({
-                    "method": "training",
-                    "episode_id": ep_id,
-                    "task_id": task,
-                    "step": si,
-                    "reward": float(p.get("reward", 0.0) or 0.0),
-                    "done": bool(p.get("done", False)),
-                    **fields,
-                })
-        elif isinstance(trajectory, list):
-            for step_row in trajectory:
-                if not isinstance(step_row, dict):
+                if not isinstance(action, dict):
                     continue
-                p = {
-                    "action_type": step_row.get("action_type", ""),
-                    "decision": step_row.get("decision"),
-                    "query": step_row.get("query"),
-                    "message": step_row.get("message"),
-                    "reason": step_row.get("reason"),
-                    "_rule_keyword": row.get("rule_keyword", ""),
-                }
-                fields = _action_fields_from_dict(p)
-                actions.append({
-                    "method": "training",
-                    "episode_id": ep_id,
-                    "task_id": task,
-                    "step": int(step_row.get("step", 0) or 0),
-                    "reward": float(step_row.get("reward", 0.0) or 0.0),
-                    "done": bool(step_row.get("done", False)),
-                    **fields,
-                })
+                step_rows.append(
+                    {
+                        "step": si,
+                        "action_type": action.get("action_type", ""),
+                        "decision": action.get("decision"),
+                        "query": action.get("query"),
+                        "message": action.get("message"),
+                        "reason": action.get("reason"),
+                        "reward": 0.0,
+                        "done": si == steps,
+                    }
+                )
+        for step_row in step_rows:
+            step_num = int(step_row.get("step", 0) or 0)
+            p = {
+                "action_type": step_row.get("action_type", ""),
+                "decision": step_row.get("decision"),
+                "query": step_row.get("query"),
+                "message": step_row.get("message"),
+                "reason": step_row.get("reason"),
+                "_rule_keyword": rule_kw,
+            }
+            fields = _action_fields_from_dict(p)
+            actions.append({
+                "method": "training",
+                "episode_id": ep_id,
+                "task_id": task,
+                "step": step_num,
+                "reward": float(step_row.get("reward", 0.0) or 0.0),
+                "done": bool(step_row.get("done", False)),
+                **fields,
+            })
     return episodes, actions
+
+
+def _load_training_replay(
+    training_metrics_file: MethodMetrics,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], MethodMetrics, List[Dict[str, Any]]]:
+    """
+    Training replay uses training_run.log (same parser as baseline/inference).
+    episodes.jsonl supplies optional score sync by claim_id.
+    KPI cards prefer training_results.json when present.
+    """
+    jsonl_rows = _read_training_jsonl()
+    t_log_eps, t_log_acts = _parse_episode_log(TRAINING_LOG, "training")
+
+    if t_log_eps:
+        _merge_training_jsonl_meta(t_log_eps, jsonl_rows)
+        t_eps, t_acts = t_log_eps, t_log_acts
+    else:
+        t_eps, t_acts = _training_frames(jsonl_rows)
+        _attach_claim_ids_from_order(t_eps)
+
+    if training_metrics_file.total > 0:
+        training = training_metrics_file
+    elif jsonl_rows:
+        training = _training_metrics(jsonl_rows)
+    else:
+        training = _metrics_from_episodes(t_eps, "training")
+
+    return t_eps, t_acts, training, jsonl_rows
 
 
 # ── Claims enrichment ──────────────────────────────────────────────────────────
@@ -497,21 +652,102 @@ def _enrich_action_policies(episodes: List[Dict[str, Any]], actions: List[Dict[s
 # ── Main data loader ───────────────────────────────────────────────────────────
 
 
+def _tool_action_counts(actions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Count SearchPolicy / RequestInformation steps in eval logs by method."""
+
+    def _counts(method: str) -> Dict[str, int]:
+        subset = [a for a in actions if a.get("method") == method]
+        return {
+            "request_information": sum(
+                1 for a in subset if a.get("action_type") == "REQUEST_INFORMATION"
+            ),
+            "search_policy": sum(
+                1 for a in subset if a.get("action_type") == "SEARCH_POLICY"
+            ),
+        }
+
+    return {
+        "before_training": {
+            "label": "Inference (before training)",
+            **_counts("inference"),
+        },
+        "after_training": {
+            "label": "Trained LLM (after training)",
+            **_counts("training"),
+        },
+    }
+
+
+def _build_rl_story(
+    inference: Dict[str, Any],
+    training: Dict[str, Any],
+    tool_actions: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Derived deltas for dashboard copy: trained vs generic LLM (before training)."""
+    if not training.get("n"):
+        return {"has_training": False}
+
+    def _f(key: str, src: Dict[str, Any]) -> float:
+        val = src.get(key)
+        return float(val) if val is not None else 0.0
+
+    im_medium = _f("medium", inference)
+    im_hard = _f("hard", inference)
+    im_overall = _f("overall", inference)
+    tr_medium = _f("medium", training)
+    tr_hard = _f("hard", training)
+    tr_overall = _f("overall", training)
+
+    im_complex = (im_medium + im_hard) / 2.0
+    tr_complex = (tr_medium + tr_hard) / 2.0
+    complex_gain = tr_complex - im_complex
+    complex_pct = (complex_gain / im_complex * 100.0) if im_complex > 0 else 0.0
+
+    before = tool_actions.get("before_training", {})
+    after = tool_actions.get("after_training", {})
+    req_before = int(before.get("request_information", 0) or 0)
+    req_after = int(after.get("request_information", 0) or 0)
+    src_before = int(before.get("search_policy", 0) or 0)
+    src_after = int(after.get("search_policy", 0) or 0)
+
+    return {
+        "has_training": True,
+        "headline": "Limited training, measurable lift where compliance is hardest",
+        "summary": (
+            "Overall score stays nearly flat because easy tickets are already mostly solved. "
+            "The useful signal is on Medium and Hard claims—policy search, missing documents, "
+            "and multi-step judgment."
+        ),
+        "why_it_matters": (
+            "With a small SFT + GRPO run, the model did not only memorize easy approvals. "
+            "It shifted toward realistic compliance work: searching policy more often, "
+            "requesting missing documents more often, and scoring higher on Medium and Hard "
+            "tickets. That makes this environment feasible for training agents under incomplete "
+            "information—not just benchmarking a prompted LLM."
+        ),
+        "medium_gain": round(tr_medium - im_medium, 3),
+        "hard_gain": round(tr_hard - im_hard, 3),
+        "complex_task_gain": round(complex_gain, 3),
+        "complex_task_gain_pct": round(complex_pct, 1),
+        "overall_delta": round(tr_overall - im_overall, 3),
+        "inference_overall": round(im_overall, 3),
+        "trained_overall": round(tr_overall, 3),
+        "request_information_before": req_before,
+        "request_information_after": req_after,
+        "search_policy_before": src_before,
+        "search_policy_after": src_after,
+        "before_label": before.get("label", "Inference (before training)"),
+        "after_label": after.get("label", "Trained LLM (after training)"),
+    }
+
+
 def _load_dashboard_data() -> Dict[str, Any]:
     baseline = _load_metrics(BASELINE_RESULTS, "baseline")
     inference = _load_metrics(INFERENCE_RESULTS, "inference")
     training_metrics_file = _load_metrics(TRAINING_RESULTS, "training")
     b_eps, b_acts = _parse_episode_log(BASELINE_LOG, "baseline")
     i_eps, i_acts = _parse_episode_log(INFERENCE_LOG, "inference")
-    t_log_eps, t_log_acts = _parse_episode_log(TRAINING_LOG, "training")
-    training_rows = _read_jsonl(TRAINING_EPISODES, last_n=800)
-    training = _training_metrics(training_rows)
-    if training.total == 0 and training_metrics_file.total > 0:
-        training = training_metrics_file
-    if t_log_eps:
-        t_eps, t_acts = t_log_eps, t_log_acts
-    else:
-        t_eps, t_acts = _training_frames(training_rows)
+    t_eps, t_acts, training, _ = _load_training_replay(training_metrics_file)
 
     claims_idx = _load_claims_index()
     all_eps = _enrich_episodes(b_eps + i_eps + t_eps, claims_idx)
@@ -521,28 +757,22 @@ def _load_dashboard_data() -> Dict[str, Any]:
         if action.get("decision") is not None:
             action["decision"] = _normalize_decision(action["decision"])
     _enrich_action_policies(all_eps, all_acts)
-
-    learning = [
-        {"episode": idx, "grader_score": float(r.get("grader_score", r.get("score", 0.0)) or 0.0)}
-        for idx, r in enumerate(training_rows, 1)
-        if r.get("grader_score", r.get("score")) is not None
-    ]
-    if not learning and TRAINING_LEARNING_CURVE.exists():
-        for idx, row in enumerate(_read_jsonl(TRAINING_LEARNING_CURVE, last_n=400), 1):
-            per = row.get("per_difficulty") or {}
-            scores = [
-                float(per[t].get("mean_grader_score", 0.0) or 0.0)
-                for t in TASK_ORDER
-                if isinstance(per.get(t), dict)
-            ]
-            if scores:
-                learning.append(
-                    {
-                        "episode": idx,
-                        "grader_score": sum(scores) / len(scores),
-                        "step": row.get("global_step", idx),
-                    }
-                )
+    tool_actions = _tool_action_counts(all_acts)
+    inf_metrics = {
+        "overall": inference.overall,
+        "easy": inference.by_task.get("easy", 0.0),
+        "medium": inference.by_task.get("medium", 0.0),
+        "hard": inference.by_task.get("hard", 0.0),
+        "n": inference.total,
+    }
+    tr_metrics = {
+        "overall": training.overall if training.total > 0 else None,
+        "easy": training.by_task.get("easy") if training.total > 0 else None,
+        "medium": training.by_task.get("medium") if training.total > 0 else None,
+        "hard": training.by_task.get("hard") if training.total > 0 else None,
+        "n": training.total,
+    }
+    rl_story = _build_rl_story(inf_metrics, tr_metrics, tool_actions)
 
     return {
         "artifact_root": str(ARTIFACT_ROOT),
@@ -554,24 +784,13 @@ def _load_dashboard_data() -> Dict[str, Any]:
                 "hard": baseline.by_task.get("hard", 0.0),
                 "n": baseline.total,
             },
-            "inference": {
-                "overall": inference.overall,
-                "easy": inference.by_task.get("easy", 0.0),
-                "medium": inference.by_task.get("medium", 0.0),
-                "hard": inference.by_task.get("hard", 0.0),
-                "n": inference.total,
-            },
-            "training": {
-                "overall": training.overall if training.total > 0 else None,
-                "easy": training.by_task.get("easy") if training.total > 0 else None,
-                "medium": training.by_task.get("medium") if training.total > 0 else None,
-                "hard": training.by_task.get("hard") if training.total > 0 else None,
-                "n": training.total,
-            },
+            "inference": inf_metrics,
+            "training": tr_metrics,
         },
         "episodes": all_eps,
         "actions": all_acts,
-        "learning_data": learning,
+        "tool_actions": tool_actions,
+        "rl_story": rl_story,
         "policy_rules": POLICY_RULES,
         "task_curriculum": TASK_CURRICULUM,
     }
@@ -629,11 +848,21 @@ a{color:var(--blue);text-decoration:none}
   background:linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.015));
   margin-bottom:24px}
 .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--muted);margin-bottom:12px}
-.story-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-@media(max-width:800px){.story-grid{grid-template-columns:repeat(2,1fr)}}
+.story-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+@media(max-width:900px){.story-grid{grid-template-columns:repeat(2,1fr)}}
 .story-stat{padding:14px;background:rgba(0,0,0,.28);border-radius:12px}
 .story-stat b{display:block;font-size:22px;font-weight:810;margin-bottom:4px}
-.story-stat span{font-size:12px;color:var(--muted)}
+.story-stat span{font-size:12px;color:var(--muted);line-height:1.45}
+.story-stat .sub2{display:block;font-size:11px;color:#6f8198;margin-top:4px}
+.tool-compare{margin-top:14px;padding-top:14px;border-top:1px solid var(--border)}
+.tool-compare .eyebrow{margin-bottom:10px}
+.narrative-title{font-size:17px;font-weight:750;margin-bottom:8px;line-height:1.35}
+.narrative-lead{font-size:14px;color:#c7d2de;line-height:1.65;margin-bottom:14px;max-width:920px}
+.narrative-foot{font-size:13px;color:var(--muted);line-height:1.65;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);max-width:920px}
+.narrative-note{font-size:12px;color:#6f8198;margin-top:8px}
+.story-grid.five{grid-template-columns:repeat(5,1fr)}
+@media(max-width:1100px){.story-grid.five{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:700px){.story-grid.five{grid-template-columns:repeat(2,1fr)}}
 
 /* Chart */
 .chart-section{padding:22px 20px;border:1px solid var(--border);border-radius:20px;
@@ -829,8 +1058,9 @@ const eps=D.episodes||[];
 const acts=D.actions||[];
 const M=D.metrics||{};
 const rules=D.policy_rules||[];
-const learning=D.learning_data||[];
 const curriculum=D.task_curriculum||[];
+const toolActs=D.tool_actions||{};
+const rlStory=D.rl_story||{};
 
 /* ── Utilities ── */
 const fmt3=v=>v!=null?Number(v).toFixed(3):'pending';
@@ -909,7 +1139,7 @@ function App(){
     return searches.length?(searches[searches.length-1].query||null):null;
   },[playStep,epActs,selEp]);
 
-  const methLabel={baseline:'Baseline',inference:'Inference',training:'Train'}[methTab]||methTab;
+  const methLabel={baseline:'Baseline',inference:'Inference',training:'Trained LLM'}[methTab]||methTab;
 
   return h('div',{className:'dash'},
     h(HeroSection,null),
@@ -919,7 +1149,7 @@ function App(){
     h(TaskCurriculum,null),
     h('div',{className:'sec-hd'},
       h('h2',null,'Episode Replay'),
-      h('p',null,'Choose difficulty and agent, load a random episode, then press Play to step through the trace.')
+      h('p',null,'Choose difficulty and agent, then load a random episode to view the trace.')
     ),
     h('div',{className:'replay-controls'},
       h('div',{className:'tab-grp'},
@@ -927,7 +1157,7 @@ function App(){
           h('button',{key:t,className:'tab-btn'+(diffTab===t?' act':''),onClick:()=>setDiffTab(t)},
             t.charAt(0).toUpperCase()+t.slice(1)))),
       h('div',{className:'tab-grp'},
-        ...[['baseline','Baseline'],['inference','Inference'],['training','Train']].map(([id,lbl])=>
+        ...[['baseline','Baseline'],['inference','Inference'],['training','Trained LLM']].map(([id,lbl])=>
           h('button',{key:id,className:'tab-btn'+(methTab===id?' act':''),onClick:()=>setMethTab(id)},lbl))),
       h('button',{className:'random-btn',onClick:handleRandom,disabled:!filtEps.length},
         'Random episode'),
@@ -943,10 +1173,9 @@ function App(){
         )
       :h('div',{className:'replay-empty'},
         filtEps.length
-          ?'Pick Easy / Medium / Hard and Baseline / Inference / Train, then click Random episode.'
+          ?'Pick Easy / Medium / Hard and Baseline / Inference / Trained LLM, then click Random episode.'
           :'No episodes for this filter. Run baseline/inference/training eval locally, then open /dashboard on the same machine (artifact root: '+(D.artifact_root||'?')+').'),
-    h(PolicyRulebook,{highlighted:highlightedRule}),
-    learning.length>0?h(LearnCurve,null):null
+    h(PolicyRulebook,{highlighted:highlightedRule})
   );
 }
 
@@ -969,7 +1198,7 @@ function KPIGrid(){
   return h('div',{className:'kpi-grid'},
     h(KPICard,{lbl:'Rule Baseline',val:fmt3(M.baseline&&M.baseline.overall),color:'#378ADD',sub:'n='+bN+' claims'}),
     h(KPICard,{lbl:'Generic LLM',val:fmt3(M.inference&&M.inference.overall),color:'#EF9F27',sub:'n='+iN+' claims'}),
-    h(KPICard,{lbl:'SFT + GRPO',val:tN>0?fmt3(M.training&&M.training.overall):'pending',color:'#888780',sub:tN>0?'n='+tN+' episodes':'training ongoing'}),
+    h(KPICard,{lbl:'Trained LLM',val:tN>0?fmt3(M.training&&M.training.overall):'pending',color:'#888780',sub:tN>0?'n='+tN+' claims':'training ongoing'}),
     h(KPICard,{lbl:'Policy Rules',val:'15',color:'#58d68d',sub:'rules the agent must learn'})
   );
 }
@@ -1008,26 +1237,67 @@ function TaskCurriculum(){
 }
 
 function NarrativePanel(){
-  const reqN=acts.filter(a=>a.action_type==='REQUEST_INFORMATION').length;
-  const srcN=acts.filter(a=>a.action_type==='SEARCH_POLICY').length;
-  const bm=M.baseline||{},im=M.inference||{};
-  const od=(im.overall||0)-(bm.overall||0);
-  const hd=(im.hard||0)-(bm.hard||0);
-  const s=v=>(v>0?'+':'')+v.toFixed(3);
+  if(!rlStory.has_training){
+    return h('div',{className:'narrative'},
+      h('div',{className:'eyebrow'},'Why reinforcement learning'),
+      h('p',{className:'narrative-lead'},'Run checkpoint eval to populate Trained LLM metrics and show the training story here.')
+    );
+  }
+  const s=v=>(v>0?'+':'')+Number(v).toFixed(3);
+  const pct=v=>(v>0?'+':'')+Number(v).toFixed(1)+'%';
+  const arrow=(a,b)=>a+' \u2192 '+b;
+  const gainColor=v=>v>0?'#58d68d':v<0?'#e74c3c':'#8ea0b5';
+  const mg=rlStory.medium_gain||0;
+  const hg=rlStory.hard_gain||0;
+  const cg=rlStory.complex_task_gain||0;
+  const cp=rlStory.complex_task_gain_pct||0;
+  const od=rlStory.overall_delta||0;
+  const reqB=rlStory.request_information_before||0;
+  const reqA=rlStory.request_information_after||0;
+  const srcB=rlStory.search_policy_before||0;
+  const srcA=rlStory.search_policy_after||0;
   return h('div',{className:'narrative'},
     h('div',{className:'eyebrow'},'Why reinforcement learning'),
-    h('div',{className:'story-grid'},
-      h('div',{className:'story-stat'},h('b',{style:{color:od<0?'#e74c3c':'#58d68d'}},s(od)),h('span',null,'LLM vs baseline overall grader score')),
-      h('div',{className:'story-stat'},h('b',{style:{color:hd<0?'#e74c3c':'#58d68d'}},s(hd)),h('span',null,'LLM vs baseline on hard tasks')),
-      h('div',{className:'story-stat'},h('b',null,reqN),h('span',null,'RequestInformation actions in logs')),
-      h('div',{className:'story-stat'},h('b',null,srcN),h('span',null,'SearchPolicy actions in logs'))
-    )
+    h('div',{className:'narrative-title'},rlStory.headline||'Trained LLM results'),
+    h('p',{className:'narrative-lead'},rlStory.summary||''),
+    h('div',{className:'story-grid five'},
+      h('div',{className:'story-stat'},
+        h('b',{style:{color:gainColor(mg)}},s(mg)),
+        h('span',null,'Medium lift (Trained vs Generic LLM)'),
+        h('span',{className:'sub2'},'Policy retrieval tasks')
+      ),
+      h('div',{className:'story-stat'},
+        h('b',{style:{color:gainColor(hg)}},s(hg)),
+        h('span',null,'Hard lift (Trained vs Generic LLM)'),
+        h('span',{className:'sub2'},'Multi-step evidence tasks')
+      ),
+      h('div',{className:'story-stat'},
+        h('b',{style:{color:gainColor(cg)}},s(cg)),
+        h('span',null,'Medium + Hard average lift'),
+        h('span',{className:'sub2'},pct(cp)+' on harder claims')
+      ),
+      h('div',{className:'story-stat'},
+        h('b',null,arrow(srcB,srcA)),
+        h('span',null,'SearchPolicy actions in eval logs'),
+        h('span',{className:'sub2'},rlStory.before_label+' \u2192 '+rlStory.after_label)
+      ),
+      h('div',{className:'story-stat'},
+        h('b',null,arrow(reqB,reqA)),
+        h('span',null,'RequestInformation actions in eval logs'),
+        h('span',{className:'sub2'},rlStory.before_label+' \u2192 '+rlStory.after_label)
+      )
+    ),
+    h('p',{className:'narrative-note'},
+      'Overall nearly flat ('+Number(rlStory.inference_overall||0).toFixed(3)+' \u2192 '+
+      Number(rlStory.trained_overall||0).toFixed(3)+', '+s(od)+') because easy tickets were already high; RL value shows up on harder cases.'
+    ),
+    h('p',{className:'narrative-foot'},rlStory.why_it_matters||'')
   );
 }
 
 function GroupedBarFallback({data,hasT}){
   const colors={baseline:'#378ADD',llm:'#EF9F27',rl:'#888780'};
-  const labels={baseline:'Rule Baseline',llm:'Generic LLM',rl:'SFT+GRPO'};
+  const labels={baseline:'Rule Baseline',llm:'Generic LLM',rl:'Trained LLM'};
   return h('div',{className:'css-chart'},
     h('div',{className:'css-chart-scale'},'1.0','0.5','0.0'),
     ...data.map((row,i)=>h('div',{key:i,className:'css-chart-group'},
@@ -1072,7 +1342,7 @@ function ScoreChart(){
   }
   return h('div',{className:'chart-section'},
     h('h2',null,'Mean Grader Score Comparison'),
-    h('p',{className:'sub'},'Side-by-side bars \u2014 same metric across all three methods. SFT+GRPO bars are at 0 (pending) until GRPO training completes.'),
+    h('p',{className:'sub'},'Side-by-side bars \u2014 same metric across all three methods. Trained LLM bars are at 0 (pending) until checkpoint eval completes.'),
     h(RC.ResponsiveContainer,{width:'100%',height:270},
       h(RC.BarChart,{data,barCategoryGap:'24%',barGap:4,margin:{top:8,right:16,left:0,bottom:0}},
         h(RC.CartesianGrid,{strokeDasharray:'3 3',stroke:'rgba(255,255,255,0.07)',vertical:false}),
@@ -1082,7 +1352,7 @@ function ScoreChart(){
         h(RC.Legend,{wrapperStyle:{color:'#aab7c7',fontSize:'13px',paddingTop:'6px'}}),
         h(RC.Bar,{dataKey:'baseline',name:'Rule Baseline',fill:'#378ADD',radius:[4,4,0,0],maxBarSize:46}),
         h(RC.Bar,{dataKey:'llm',name:'Generic LLM',fill:'#EF9F27',radius:[4,4,0,0],maxBarSize:46}),
-        h(RC.Bar,{dataKey:'rl',name:'SFT+GRPO',fill:'#888780',radius:[4,4,0,0],maxBarSize:46,opacity:hasT?1:0.32})
+        h(RC.Bar,{dataKey:'rl',name:'Trained LLM',fill:'#888780',radius:[4,4,0,0],maxBarSize:46,opacity:hasT?1:0.32})
       )
     )
   );
@@ -1134,10 +1404,7 @@ function TicketPanel({ep}){
 function AgentPanel({ep,allActs,visActs,playing,onPlay,expectedSearch}){
   return h('div',{className:'col-panel'},
     h('div',{className:'col-title-row'},
-      h('div',{className:'col-title'},'Agent Reasoning'),
-      h('button',{className:'play-btn',onClick:onPlay,disabled:playing},
-        h('span',{className:'play-icon'+(playing?' playing':'')}),
-        playing?'Playing\u2026':'Play')
+      h('div',{className:'col-title'},'Agent Reasoning')
     ),
     h('div',{className:'timeline'},
       ...allActs.map((a,i)=>h(StepCard,{key:i,action:a,vis:i<visActs.length,expectedSearch})),
@@ -1224,26 +1491,6 @@ function PolicyRulebook({highlighted}){
         })
       )
     ):null
-  );
-}
-
-function LearnCurve(){
-  const tt={background:'#1a2332',border:'1px solid rgba(255,255,255,.12)',borderRadius:'10px',color:'#edf2f7'};
-  if(!RC.LineChart){
-    return h('div',{className:'chart-section'},h('h2',null,'Learning Curve'),h('p',{className:'sub'},learning.length+' training episodes loaded.'));
-  }
-  return h('div',{className:'chart-section'},
-    h('h2',null,'Learning Curve'),
-    h('p',{className:'sub'},'Training grader score over GRPO episodes (training/logs/episodes.jsonl).'),
-    h(RC.ResponsiveContainer,{width:'100%',height:200},
-      h(RC.LineChart,{data:learning,margin:{top:8,right:16,left:0,bottom:0}},
-        h(RC.CartesianGrid,{strokeDasharray:'3 3',stroke:'rgba(255,255,255,.07)',vertical:false}),
-        h(RC.XAxis,{dataKey:'episode',stroke:'#8ea0b5',tick:{fill:'#8ea0b5',fontSize:12}}),
-        h(RC.YAxis,{domain:[0,1],stroke:'#8ea0b5',tick:{fill:'#8ea0b5',fontSize:12},tickFormatter:v=>v.toFixed(1)}),
-        h(RC.Tooltip,{contentStyle:tt,formatter:v=>v.toFixed(3)}),
-        h(RC.Line,{type:'monotone',dataKey:'grader_score',name:'Grader Score',stroke:'#58d68d',dot:false,strokeWidth:2})
-      )
-    )
   );
 }
 

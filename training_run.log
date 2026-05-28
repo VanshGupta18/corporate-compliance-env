@@ -1,0 +1,618 @@
+[LOG] Writing run log to training_run.log
+Running training for claim EXP-20004 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+The following generation flags are not valid and may be ignored: ['temperature', 'top_p', 'top_k']. Set `TRANSFORMERS_VERBOSITY=info` for more details.
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20099 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20032 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: Receipt."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20107 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Manager approval not yet received."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.10,-1.00
+Running training for claim EXP-20087 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval not yet received."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20091 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.20 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 5: Large meals require manager approval."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.20,1.00
+Running training for claim EXP-20052 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="large meal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 3: Receipt AND manager approval note."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20020 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 4: Receipts must be submitted with all meal claims."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20080 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20072 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="large meal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 3: Receipt AND manager approval note."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20027 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: Receipt."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20082 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval not yet received."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20075 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20040 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 3: Manager approval."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20092 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval not yet received."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20025 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 4: Receipts must be submitted with all meal claims."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20023 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20045 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20001 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 4: Receipts required for meals."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20057 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="large meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 3: Receipt AND manager approval note."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20105 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="personal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 15: Personal expenses are never approved."
+[END] success=false steps=2 score=0.350 rewards=0.15,1.00
+Running training for claim EXP-20030 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 4: Receipts must be submitted with all meal claims."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20036 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 5: Receipts required for meals."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20028 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20095 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="personal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 15: Personal expenses are never approved."
+[END] success=false steps=2 score=0.350 rewards=0.15,1.00
+Running training for claim EXP-20088 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Rule keyword is hidden; need more info."
+[END] success=false steps=1 score=0.150 rewards=-1.00
+Running training for claim EXP-20108 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=-0.05 done=false query="meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 5: Seniority level L7+ approved without receipt."
+[END] success=false steps=2 score=0.150 rewards=-0.05,-1.00
+Running training for claim EXP-20117 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval not yet received."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20058 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 6: Cab rides after 10:00 PM are pre-approved with receipt."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20068 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 6: Cab rides after 10:00 PM are pre-approved with receipt."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20063 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 6: Cab rides after 10:00 PM are pre-approved with receipt."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20012 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: Receipt."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20065 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.10,-1.00
+Running training for claim EXP-20118 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=-0.05 done=false query="meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing critical document: manager approval."
+[END] success=false steps=2 score=0.150 rewards=-0.05,-1.00
+Running training for claim EXP-20062 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="large meal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 3: Receipt AND manager approval note."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20090 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=-0.05 done=false query="meal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 5: Personal expenses like gyms are not reimbursable."
+[END] success=false steps=2 score=0.150 rewards=-0.05,1.00
+Running training for claim EXP-20034 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20104 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20015 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 4: Receipts must be submitted with all meal claims."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20089 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20119 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20071 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Manager approval missing."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.10,-1.00
+Running training for claim EXP-20051 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval missing."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20039 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20097 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval not yet received."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20002 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: Receipt."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20120 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="personal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 15: Personal expenses are never approved."
+[END] success=false steps=2 score=0.350 rewards=0.15,1.00
+Running training for claim EXP-20056 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Manager approval not received."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.10,-1.00
+Running training for claim EXP-20013 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20103 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Rule keyword is hidden; cannot proceed."
+[END] success=false steps=1 score=0.150 rewards=-1.00
+Running training for claim EXP-20031 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 5: Receipts required for meals."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20014 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20006 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 4: Receipts required for meals."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20046 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval missing."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20009 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20018 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: manager approval note."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20024 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20033 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20016 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 4: Manager approval required."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20074 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="wfh"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 11: WFH utility claims capped at Rs1000/month."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20048 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 6: Cab rides after 10:00 PM are pre-approved with receipt."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20094 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20061 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Manager approval missing."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.10,-1.00
+Running training for claim EXP-20111 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.20 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 4: Large meals require manager approval."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.20,-1.00
+Running training for claim EXP-20093 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=-0.05 done=false query="meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 5: Meal claim under Rs5000 with receipt."
+[END] success=false steps=2 score=0.150 rewards=-0.05,-1.00
+Running training for claim EXP-20077 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="large meal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 3: Receipt AND manager approval note."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20101 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.20 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 3: Large meal with manager approval."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.20,1.00
+Running training for claim EXP-20037 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: Receipt."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20064 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="wfh"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 11: WFH utility claims capped at Rs1000/month."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20042 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="large meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing required document: manager approval note."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20035 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 4: Receipts must be provided."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20041 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval missing."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20026 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 5: Receipts must be submitted with all meal claims."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20047 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="large meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing required document: manager approval note."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20029 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20110 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="personal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 15: Personal expenses are never approved."
+[END] success=false steps=2 score=0.350 rewards=0.15,1.00
+Running training for claim EXP-20019 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20114 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20017 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: Receipt."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20070 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20022 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing document: Receipt."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20073 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 6: Cab rides after 10:00 PM are pre-approved with receipt."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20112 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Manager approval not yet received."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.10,-1.00
+Running training for claim EXP-20066 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval missing."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20086 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.20 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 10: Large meals require manager approval."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.20,1.00
+Running training for claim EXP-20109 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20106 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.20 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 4: Large meals require manager approval."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.20,1.00
+Running training for claim EXP-20096 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.20 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 7: Large meals require manager approval."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.20,-1.00
+Running training for claim EXP-20049 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="wfh"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Rule 11: WFH utility claims capped at Rs1000/month."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20059 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="wfh"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Rule 11: WFH utility claims capped at Rs1000/month."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20010 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 3: Manager approval."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20079 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="wfh"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 11: WFH utility claims capped at Rs1000/month."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20116 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.20 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 4: Large meals require manager approval."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.20,-1.00
+Running training for claim EXP-20069 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="wfh"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Rule 11: WFH utility claims capped at Rs1000/month."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20078 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 6: Cab rides after 10:00 PM are pre-approved with receipt."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20053 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 6: Cab rides after 10:00 PM are pre-approved with receipt."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20060 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.10,-1.00
+Running training for claim EXP-20083 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=-0.05 done=false query="meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing critical document: manager approval."
+[END] success=false steps=2 score=0.150 rewards=-0.05,-1.00
+Running training for claim EXP-20050 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20007 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: Receipt."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20038 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: manager approval note."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20067 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="large meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing required document: manager approval note."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20011 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 5: Meal receipts under Rs.1000."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20113 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=-0.05 done=false query="meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing critical document: manager approval."
+[END] success=false steps=2 score=0.150 rewards=-0.05,-1.00
+Running training for claim EXP-20076 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Manager approval missing."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20085 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="personal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 15: Personal expenses are never approved."
+[END] success=false steps=2 score=0.350 rewards=0.15,1.00
+Running training for claim EXP-20021 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 5: Receipts must be submitted with all meal claims."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20100 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=-0.05 done=false query="meal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 5: Personal expenses like gyms are not reimbursable."
+[END] success=false steps=2 score=0.150 rewards=-0.05,1.00
+Running training for claim EXP-20054 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="wfh"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 11: WFH utility claims capped at Rs1000/month."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+Running training for claim EXP-20102 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Manager approval not yet received."
+[END] success=false steps=3 score=0.350 rewards=0.15,0.10,-1.00
+Running training for claim EXP-20084 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20055 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="gst"
+[STEP] step=2 action=RequestInformation reward=0.10 done=false message="Please provide gst invoice"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Reject reason="GST invoice not provided."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.10,1.00
+Running training for claim EXP-20008 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20005 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 4: Receipts must be submitted with all meal claims."
+[END] success=false steps=1 score=0.450 rewards=-1.00
+Running training for claim EXP-20081 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="meal"
+[STEP] step=2 action=RequestInformation reward=0.20 done=false message="Please provide manager approval"
+[STEP] step=3 action=ResolveTicket reward=1.00 done=true decision=Approve reason="Rule 4: Large meals require manager approval."
+[END] success=true steps=3 score=0.990 rewards=0.15,0.20,1.00
+Running training for claim EXP-20003 (easy)...
+[START] task=EASY env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Missing document: manager approval."
+[END] success=true steps=1 score=0.990 rewards=1.00
+Running training for claim EXP-20043 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="cab"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Approve reason="Rule 6: Cab rides after 10:00 PM are pre-approved with receipt."
+[END] success=false steps=2 score=0.350 rewards=0.15,-1.00
+Running training for claim EXP-20098 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=-0.05 done=false query="meal"
+[STEP] step=2 action=ResolveTicket reward=-1.00 done=true decision=Reject reason="Missing critical document: manager approval."
+[END] success=false steps=2 score=0.150 rewards=-0.05,-1.00
+Running training for claim EXP-20115 (hard)...
+[START] task=HARD env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="personal"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 15: Personal expenses are never approved."
+[END] success=false steps=2 score=0.350 rewards=0.15,1.00
+Running training for claim EXP-20044 (medium)...
+[START] task=MEDIUM env=corporate-compliance-env model=training-checkpoint
+[STEP] step=1 action=SearchPolicy reward=0.15 done=false query="wfh"
+[STEP] step=2 action=ResolveTicket reward=1.00 done=true decision=Reject reason="Rule 11: WFH utility claims capped at Rs1000/month."
+[END] success=true steps=2 score=0.990 rewards=0.15,1.00
+eval_mode=local split=test
+easy: grader_mean=0.801 min=0.450 max=0.990 n=40
+easy: decision_acc=0.650 loop_rate=0.000 floor_rate=0.000 escalate_rate=0.000
+easy: baseline_mean=0.909 delta=-0.108 gate=FAIL
+medium: grader_mean=0.750 min=0.350 max=0.990 n=40
+medium: decision_acc=0.625 loop_rate=0.000 floor_rate=0.000 escalate_rate=0.000
+medium: baseline_mean=0.713 delta=+0.037 gate=PASS
+hard: grader_mean=0.588 min=0.150 max=0.990 n=40
+hard: decision_acc=0.450 loop_rate=0.000 floor_rate=0.000 escalate_rate=0.000
+hard: baseline_mean=0.528 delta=+0.060 gate=PASS
+overall_grader_mean=0.713
+
+
+[SUMMARY] Training Results:
+  OVERALL: 0.713 (n=120)
+  EASY: 0.801 (n=40)
+  MEDIUM: 0.750 (n=40)
+  HARD: 0.588 (n=40)
