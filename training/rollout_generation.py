@@ -28,6 +28,37 @@ def cap_rollout_tokens(
     return capped_prompt or [0], capped_completion or [0], capped_logprobs or [0.0]
 
 
+def concat_episode_rollout_tokens(
+    step_gens: List[Dict[str, Any]],
+    *,
+    max_prompt: int,
+    max_completion: int,
+) -> tuple[List[int], List[int], List[float]]:
+    """Merge per-step GRPO tokens so every turn receives shared episode reward."""
+    if not step_gens:
+        return [0], [0], [0.0]
+
+    prompt_ids = list(step_gens[0].get("prompt_ids") or [0])
+    completion_ids: List[int] = []
+    logprobs: List[float] = []
+    for gen in step_gens:
+        completion_ids.extend(list(gen.get("completion_ids") or []))
+        step_logprobs = list(gen.get("logprobs") or [])
+        if len(step_logprobs) < len(gen.get("completion_ids") or []):
+            step_logprobs = step_logprobs + [0.0] * (
+                len(gen.get("completion_ids") or []) - len(step_logprobs)
+            )
+        logprobs.extend(step_logprobs[: len(gen.get("completion_ids") or [])])
+
+    return cap_rollout_tokens(
+        prompt_ids,
+        completion_ids,
+        logprobs,
+        max_prompt=max_prompt,
+        max_completion=max_completion,
+    )
+
+
 def _resolve_model(trainer):
     model = getattr(trainer, "model_wrapped", None) or getattr(trainer, "model", None)
     accelerator = getattr(trainer, "accelerator", None)

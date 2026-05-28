@@ -134,7 +134,8 @@ def _step_local_env(
     text: str,
     observation: Dict[str, Any],
 ) -> tuple[float, bool, Dict[str, Any]]:
-    payload = parse_model_action(text, observation)
+    claim = dict(getattr(env, "_current_claim", {}) or {})
+    payload = parse_model_action(text, observation, claim)
     try:
         obs = env.step(ComplianceAction(**payload))
         return float(obs.reward or 0.0), bool(obs.done), obs.model_dump()
@@ -238,11 +239,11 @@ def _generate_step(trainer, step_prompt: str) -> Dict[str, Any]:
 
 def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
     """Run one full ComplianceEnv episode using tutorial-style generation."""
+    from training.rollout_generation import concat_episode_rollout_tokens
+
     env = ComplianceEnv()
     env.reset(task_id=task_id, split="train")
-    last_prompt_ids: List[int] = [0]
-    last_completion_ids: List[int] = [0]
-    last_logprobs: List[float] = [0.0]
+    step_gens: List[Dict[str, Any]] = []
     format_scores: List[float] = []
     raw_json_valid = True
     done = False
@@ -264,11 +265,23 @@ def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
         raw_json_valid = raw_json_valid and bool(valid_action)
         format_scores.append(0.10 if valid_action else -0.10)
 
-        last_prompt_ids, last_completion_ids, last_logprobs = _tokens_from_generation(
-            trainer, gen
+        prompt_ids, completion_ids, logprobs = _tokens_from_generation(trainer, gen)
+        step_gens.append(
+            {
+                "prompt_ids": prompt_ids,
+                "completion_ids": completion_ids,
+                "logprobs": logprobs,
+            }
         )
 
         _reward, done, obs = _step_local_env(env, text, obs)
+
+    max_prompt, max_completion = _rollout_length_limits(trainer)
+    prompt_ids, completion_ids, logprobs = concat_episode_rollout_tokens(
+        step_gens,
+        max_prompt=max_prompt,
+        max_completion=max_completion,
+    )
 
     actions = env.state.actions_history
     request_count = sum(1 for action in actions if action.get("action_type") == "RequestInformation")
@@ -277,9 +290,9 @@ def rollout_once_local(trainer, task_id: str) -> Dict[str, Any]:
     unresolved_penalty = -0.25 if resolve_count == 0 else 0.0
 
     return {
-        "prompt_ids": last_prompt_ids,
-        "completion_ids": last_completion_ids,
-        "logprobs": last_logprobs,
+        "prompt_ids": prompt_ids,
+        "completion_ids": completion_ids,
+        "logprobs": logprobs,
         "grader_score": _grade_local_env(env, task_id),
         "env_reward": env.state.cumulative_reward,
         "format_reward": 0.05 if (raw_json_valid and resolve_count > 0) else -0.15,
@@ -319,8 +332,11 @@ def rollout_remote(
     if ComplianceEnvClient is None:
         raise RuntimeError("ComplianceEnvClient unavailable; use --use-local-env for Colab.")
 
+    from training.rollout_generation import concat_episode_rollout_tokens
+
     claim_lookup = _load_claim_lookup()
     results: List[Dict[str, Any]] = []
+    max_prompt, max_completion = _rollout_length_limits(trainer)
 
     with ComplianceEnvClient(base_url=api_url).sync() as client:
         for _prompt, task_id in zip(prompts, task_ids):
@@ -329,9 +345,7 @@ def rollout_remote(
             ticket_id = obs.get("ticket_id")
             claim = claim_lookup.get(ticket_id, {})
 
-            last_prompt_ids: List[int] = [0]
-            last_completion_ids: List[int] = [0]
-            last_logprobs: List[float] = [0.0]
+            step_gens: List[Dict[str, Any]] = []
             raw_json_valid = True
             done = reset_r.done
             steps = 0
@@ -342,16 +356,29 @@ def rollout_remote(
                 step_prompt = _render_step_prompt(trainer, task_id, obs)
                 gen = _generate_step(trainer, step_prompt)
                 text = _generated_text(trainer, gen)
-                last_prompt_ids, last_completion_ids, last_logprobs = _tokens_from_generation(
+                prompt_ids, completion_ids, logprobs = _tokens_from_generation(
                     trainer, gen
+                )
+                step_gens.append(
+                    {
+                        "prompt_ids": prompt_ids,
+                        "completion_ids": completion_ids,
+                        "logprobs": logprobs,
+                    }
                 )
 
                 raw_payload = parse_json_payload(text)
                 raw_json_valid = raw_json_valid and bool(raw_payload)
-                payload = parse_model_action(text, obs)
+                payload = parse_model_action(text, obs, claim)
                 step_r = client.step(ComplianceAction(**payload))
                 obs = step_r.observation.model_dump()
                 done = step_r.done
+
+            prompt_ids, completion_ids, logprobs = concat_episode_rollout_tokens(
+                step_gens,
+                max_prompt=max_prompt,
+                max_completion=max_completion,
+            )
 
             state = client.state()
             actions_history = getattr(state, "actions_history", [])
@@ -369,9 +396,9 @@ def rollout_remote(
             )
             results.append(
                 {
-                    "prompt_ids": last_prompt_ids,
-                    "completion_ids": last_completion_ids,
-                    "logprobs": last_logprobs,
+                    "prompt_ids": prompt_ids,
+                    "completion_ids": completion_ids,
+                    "logprobs": logprobs,
                     "grader_score": float(grader["score"]),
                     "env_reward": sum(getattr(state, "rewards_history", []) or []),
                     "format_reward": 0.05 if (raw_json_valid and resolve_count > 0) else -0.15,

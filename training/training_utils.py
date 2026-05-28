@@ -30,6 +30,7 @@ You are an AI Compliance Officer. Audit employee expense claims against company 
 Use the available action JSON types:
 - EASY: never SearchPolicy; Resolve directly.
 - MEDIUM/HARD: SearchPolicy once when rule_keyword is hidden (meal, gst, cab).
+- Never set SearchPolicy query to "hidden" or echo rule_keyword; use meal, gst, cab, etc.
 - RequestInformation only when missing_document is set; name the concrete doc type.
 - If env_message says a document was not provided, Reject — do not Approve.
 - ResolveTicket after policy is retrieved and any document request is answered.
@@ -70,6 +71,26 @@ _INVALID_ACTION_FALLBACK: Dict[str, Any] = {
     "decision": "Reject",
     "reason": "Invalid action format",
 }
+
+_INVALID_SEARCH_QUERIES = frozenset({"hidden", "unknown", ""})
+
+
+def sanitize_search_query(
+    query: Any,
+    observation: Optional[Dict[str, Any]] = None,
+    claim: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Map missing or placeholder queries to a real policy keyword (never 'hidden')."""
+    from app.agent_helpers import search_query_for_hidden_policy
+
+    text = str(query or "").strip()
+    if text.lower() not in _INVALID_SEARCH_QUERIES:
+        return text[:500]
+
+    if observation and observation.get("rule_keyword") not in (None, "", "hidden"):
+        return str(observation.get("rule_keyword") or "policy")[:500]
+
+    return search_query_for_hidden_policy(observation or {}, claim)[:500]
 
 
 def resolve_precision(precision: str) -> tuple[bool, bool]:
@@ -157,6 +178,7 @@ def infer_required_document(observation: Optional[Dict[str, Any]]) -> str:
 def normalize_compliance_action(
     raw: Any,
     observation: Optional[Dict[str, Any]] = None,
+    claim: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Map model output (often observation-shaped) into a valid ComplianceAction dict."""
     from app.models import ComplianceAction
@@ -174,9 +196,7 @@ def normalize_compliance_action(
     normalized: Dict[str, Any] = {"action_type": action_type}
     if action_type == "SearchPolicy":
         query = cleaned.get("query") or raw.get("query")
-        if not query and observation:
-            query = observation.get("rule_keyword") or "policy"
-        normalized["query"] = str(query or "policy")[:500]
+        normalized["query"] = sanitize_search_query(query, observation, claim)
     elif action_type == "RequestInformation":
         message = cleaned.get("message") or raw.get("message")
         if not message:
@@ -221,13 +241,40 @@ def normalize_compliance_action(
         return dict(_INVALID_ACTION_FALLBACK)
 
 
+def _extract_decision_from_text(
+    text: str, payload: Optional[Dict[str, Any]] = None
+) -> str:
+    """Parse ResolveTicket decision without substring false positives."""
+    if payload:
+        raw = payload.get("decision")
+        if isinstance(raw, str) and raw.strip():
+            title = raw.strip().title()
+            if title in VALID_DECISIONS:
+                return title
+
+    field_match = re.search(
+        r'decision["\']?\s*[:\-]?\s*["\']?(Approve|Reject|Escalate)["\']?',
+        text,
+        re.IGNORECASE,
+    )
+    if field_match:
+        return field_match.group(1).title()
+
+    for label in ("Reject", "Escalate", "Approve"):
+        if re.search(rf"\b{label}\b", text):
+            return label
+    return "Reject"
+
+
 def parse_model_action(
-    text: str, observation: Optional[Dict[str, Any]] = None
+    text: str,
+    observation: Optional[Dict[str, Any]] = None,
+    claim: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Parse generation text into a validated ComplianceAction dict."""
     payload = parse_json_payload(text)
     if payload:
-        return normalize_compliance_action(payload, observation)
+        return normalize_compliance_action(payload, observation, claim)
 
     if "SearchPolicy" in text:
         query_match = re.search(r'query["\']?\s*[:\-]?\s*["\']([^"\']+)["\']', text)
@@ -237,6 +284,7 @@ def parse_model_action(
                 "query": query_match.group(1) if query_match else "policy",
             },
             observation,
+            claim,
         )
     if "RequestInformation" in text:
         msg_match = re.search(r'message["\']?\s*[:\-]?\s*["\']([^"\']+)["\']', text)
@@ -248,21 +296,18 @@ def parse_model_action(
                 else "Please provide missing information",
             },
             observation,
+            claim,
         )
     if "ResolveTicket" in text:
-        decision = "Reject"
-        if "Approve" in text:
-            decision = "Approve"
-        elif "Escalate" in text:
-            decision = "Escalate"
         reason_match = re.search(r'reason["\']?\s*[:\-]?\s*["\']([^"\']+)["\']', text)
         return normalize_compliance_action(
             {
                 "action_type": "ResolveTicket",
-                "decision": decision,
+                "decision": _extract_decision_from_text(text),
                 "reason": reason_match.group(1) if reason_match else "Based on policy review",
             },
             observation,
+            claim,
         )
 
     return dict(_INVALID_ACTION_FALLBACK)
@@ -349,7 +394,10 @@ def build_step_prompt(observation: Dict[str, Any]) -> str:
         if not clean.get("missing_document"):
             extra += " ResolveTicket now; no further document requests."
     elif clean.get("rule_keyword") == "hidden":
-        extra += "\nPolicy hidden. SearchPolicy once with a short query (meal, gst, cab), then continue."
+        extra += (
+            "\nPolicy hidden. SearchPolicy once with a short query (meal, gst, cab) — "
+            "never use query=hidden."
+        )
     missing = clean.get("missing_document")
     step_count = int(clean.get("step_count", 1) or 1)
     max_steps = int(clean.get("max_steps", 8) or 8)

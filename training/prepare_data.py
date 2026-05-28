@@ -75,13 +75,16 @@ def choose_action(
         }
 
     gt = claim.get("ground_truth_decision", "Approve")
+    reason = claim.get("ground_truth_reason") or f"Ground truth: {gt}."
     rule = claim.get("rule_keyword", "policy")
+    if rule.lower() in ("hidden", "unknown", ""):
+        rule = "policy"
 
     if task_id == "easy":
         return {
             "action_type": "ResolveTicket",
             "decision": gt,
-            "reason": claim.get("ground_truth_reason", "Policy applied."),
+            "reason": reason,
         }
 
     if task_id == "medium":
@@ -93,7 +96,7 @@ def choose_action(
         return {
             "action_type": "ResolveTicket",
             "decision": gt,
-            "reason": "Decision after policy retrieval.",
+            "reason": reason,
         }
 
     # hard
@@ -111,7 +114,7 @@ def choose_action(
     return {
         "action_type": "ResolveTicket",
         "decision": gt,
-        "reason": "Decision after context gathering.",
+        "reason": reason,
     }
 
 
@@ -189,6 +192,15 @@ def _response_payload(row: Dict[str, Any]) -> Dict[str, Any]:
         return {}
 
 
+def _is_valid_sft_row(row: Dict[str, Any]) -> bool:
+    """Drop SearchPolicy rows that teach query=hidden."""
+    payload = _response_payload(row)
+    if payload.get("action_type") != "SearchPolicy":
+        return True
+    query = str(payload.get("query") or "").strip().lower()
+    return query not in ("hidden", "unknown", "")
+
+
 def _rebalance_terminal_decisions(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     by_decision: Dict[str, List[Dict[str, Any]]] = {
         "Approve": [],
@@ -250,7 +262,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    sft_rows = to_sft_format(all_records, terminal_only=False)
+    sft_rows = [row for row in to_sft_format(all_records, terminal_only=False) if _is_valid_sft_row(row)]
     positive = []
     for row in sft_rows:
         payload = _response_payload(row)

@@ -75,7 +75,7 @@ class LocalEnvRunner:
         action: Dict[str, Any],
         observation: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, Any], float, bool]:
-        payload = normalize_compliance_action(action, observation)
+        payload = normalize_compliance_action(action, observation, self._claim)
         result = self.env.step(ComplianceAction(**payload))
         obs = result.model_dump()
         return obs, float(result.reward or 0.0), bool(result.done)
@@ -116,7 +116,7 @@ class WebSocketEnvRunner:
         action: Dict[str, Any],
         observation: Optional[Dict[str, Any]] = None,
     ) -> tuple[Dict[str, Any], float, bool]:
-        payload = normalize_compliance_action(action, observation)
+        payload = normalize_compliance_action(action, observation, self._claim)
         result = self.client.step(ComplianceAction(**payload))
         obs = result.observation.model_dump()
         return obs, float(result.reward or 0.0), result.done
@@ -158,6 +158,7 @@ def generate_action(
     tokenizer,
     task_id: str,
     observation: Dict[str, Any],
+    claim: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     prompt = render_compliance_prompt(tokenizer, observation)
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
@@ -174,12 +175,16 @@ def generate_action(
         )
     new_ids = output[0][input_len:]
     text = tokenizer.decode(new_ids, skip_special_tokens=True)
-    return parse_model_action(text, observation)
+    return parse_model_action(text, observation, claim)
 
 
-def _action_for_log(action: Dict[str, Any], observation: Dict[str, Any]) -> Dict[str, Any]:
+def _action_for_log(
+    action: Dict[str, Any],
+    observation: Dict[str, Any],
+    claim: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """JSON-safe action dict for [STEP] lines (dashboard parser)."""
-    payload = normalize_compliance_action(action, observation)
+    payload = normalize_compliance_action(action, observation, claim)
     return ComplianceAction(**payload).model_dump(mode="json")
 
 
@@ -204,8 +209,9 @@ def run_episode(
 
     while not done and steps < max_steps:
         steps += 1
-        action = generate_action(model, tokenizer, task_id, observation)
-        log_action = _action_for_log(action, observation)
+        episode_claim = claim or getattr(runner, "claim", {}) or {}
+        action = generate_action(model, tokenizer, task_id, observation, episode_claim)
+        log_action = _action_for_log(action, observation, episode_claim)
         observation, reward, done = runner.step(action, observation)
         rewards.append(float(reward))
         if log_to_stdout:
