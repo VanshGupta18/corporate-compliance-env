@@ -42,6 +42,9 @@ Thumbs.db
 
 # ── Logs ─────────────────────────────────────────────
 *.log
+!baseline_run.log
+!inference_run.log
+!training_run.log
 logs/
 *.out
 
@@ -70,8 +73,7 @@ data/generated_*.json
 data/temp_*.json
 
 # ── Runtime / training artifacts (regenerate locally) ──
-baseline_results.json
-inference_results.json
+# Root benchmark JSON + run logs are committed for HF /dashboard.
 training/data/
 training/logs/
 training/checkpoints/
