@@ -154,12 +154,9 @@ def test_hard_approve_without_document_applies_penalty(env):
     claim = next(
         c
         for c in env.claims
-        if c.get("id") == "EXP-20082"
-        or (
-            c.get("task_difficulty") == "hard"
-            and c.get("document_outcome") == "not_provided"
-            and c.get("ground_truth_decision") == "Approve"
-        )
+        if c.get("task_difficulty") == "hard"
+        and c.get("document_outcome") == "not_provided"
+        and (c.get("missing_document") or c.get("required_document"))
     )
     env.reset(task_id="hard", claim_id=claim["id"])
     env.step(
@@ -175,6 +172,7 @@ def test_hard_approve_without_document_applies_penalty(env):
             message=f"Please provide {req}",
         )
     )
+    env._current_claim["ground_truth_decision"] = "Approve"
     obs = env.step(
         ComplianceAction(
             action_type=ActionType.RESOLVE_TICKET,
@@ -183,8 +181,32 @@ def test_hard_approve_without_document_applies_penalty(env):
         )
     )
     assert obs.reward is not None
-    assert obs.reward <= 0.75
-    assert obs.reward > 0.5
+    assert obs.reward == pytest.approx(0.7, abs=0.05)
+
+
+def test_hard_wrong_approve_when_ground_truth_reject(env):
+    claim = next(c for c in env.claims if c.get("id") == "EXP-20082")
+    env.reset(task_id="hard", claim_id=claim["id"])
+    env.step(
+        ComplianceAction(
+            action_type=ActionType.SEARCH_POLICY,
+            query="meal",
+        )
+    )
+    env.step(
+        ComplianceAction(
+            action_type=ActionType.REQUEST_INFORMATION,
+            message="Please provide manager_approval",
+        )
+    )
+    obs = env.step(
+        ComplianceAction(
+            action_type=ActionType.RESOLVE_TICKET,
+            decision=TicketDecision.APPROVE,
+            reason="Should be reject.",
+        )
+    )
+    assert obs.reward is not None and obs.reward <= -0.99
 
 
 def test_medium_resolve_without_search_is_not_positive(env):

@@ -125,8 +125,8 @@
       "task_difficulty": "hard",
       "amount": 4223,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -308,8 +308,8 @@
       "task_difficulty": "hard",
       "amount": 4340,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -399,8 +399,8 @@
       "task_difficulty": "hard",
       "amount": 3815,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -443,8 +443,8 @@
       "task_difficulty": "hard",
       "amount": 3639,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -1546,8 +1546,8 @@
       "task_difficulty": "hard",
       "amount": 2932,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -1776,8 +1776,8 @@
       "task_difficulty": "hard",
       "amount": 3230,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -1844,8 +1844,8 @@
       "task_difficulty": "hard",
       "amount": 3622,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -1981,8 +1981,8 @@
       "task_difficulty": "hard",
       "amount": 3516,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -2349,8 +2349,8 @@
       "task_difficulty": "hard",
       "amount": 3971,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -2556,8 +2556,8 @@
       "task_difficulty": "hard",
       "amount": 4152,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -2578,8 +2578,8 @@
       "task_difficulty": "hard",
       "amount": 3210,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -3014,8 +3014,8 @@
       "task_difficulty": "hard",
       "amount": 2885,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -4139,8 +4139,8 @@
       "task_difficulty": "hard",
       "amount": 3108,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -4714,8 +4714,8 @@
       "task_difficulty": "hard",
       "amount": 3994,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -5150,8 +5150,8 @@
       "task_difficulty": "hard",
       "amount": 3978,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -5491,8 +5491,8 @@
       "task_difficulty": "hard",
       "amount": 4305,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -5859,8 +5859,8 @@
       "task_difficulty": "hard",
       "amount": 3640,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -6388,8 +6388,8 @@
       "task_difficulty": "hard",
       "amount": 3136,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -6983,8 +6983,8 @@
       "task_difficulty": "hard",
       "amount": 3278,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -7717,8 +7717,8 @@
       "task_difficulty": "hard",
       "amount": 3174,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -8084,8 +8084,8 @@
       "task_difficulty": "hard",
       "amount": 3248,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -8541,8 +8541,8 @@
       "task_difficulty": "hard",
       "amount": 3562,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -9504,8 +9504,8 @@
       "task_difficulty": "hard",
       "amount": 4334,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -9711,8 +9711,8 @@
       "task_difficulty": "hard",
       "amount": 4402,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -9779,8 +9779,8 @@
       "task_difficulty": "hard",
       "amount": 4280,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -10261,8 +10261,8 @@
       "task_difficulty": "hard",
       "amount": 3352,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -11019,8 +11019,8 @@
       "task_difficulty": "hard",
       "amount": 4360,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -11132,8 +11132,8 @@
       "task_difficulty": "hard",
       "amount": 3341,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -11292,8 +11292,8 @@
       "task_difficulty": "hard",
       "amount": 4016,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -11360,8 +11360,8 @@
       "task_difficulty": "hard",
       "amount": 3419,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -11658,8 +11658,8 @@
       "task_difficulty": "hard",
       "amount": 4106,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -12047,8 +12047,8 @@
       "task_difficulty": "hard",
       "amount": 3164,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {

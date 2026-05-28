@@ -2,7 +2,7 @@
   "metrics": {
     "overall_metrics": {
       "total_claims": 120,
-      "mean_grader_score": 0.5711666666666667
+      "mean_grader_score": 0.7165
     },
     "performance_by_difficulty": {
       "easy": {
@@ -10,11 +10,11 @@
         "total": 40
       },
       "medium": {
-        "mean_grader_score": 0.47824999999999995,
+        "mean_grader_score": 0.7125,
         "total": 40
       },
       "hard": {
-        "mean_grader_score": 0.32625000000000004,
+        "mean_grader_score": 0.528,
         "total": 40
       }
     }

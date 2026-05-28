@@ -20,6 +20,13 @@ from typing import Dict, Optional, Any
 
 from openai import OpenAI
 from app.client import ComplianceEnvClient
+from app.agent_helpers import (
+    document_unavailable,
+    effective_rule_keyword,
+    resolve_after_missing_document,
+    search_query_for_hidden_policy,
+    task_prompt_prefix,
+)
 from app.document_utils import infer_required_document
 from app.graders import grade_episode
 from app.models import ComplianceAction, ComplianceObservation
@@ -58,10 +65,12 @@ SYSTEM_PROMPT = textwrap.dedent(
     
     Valid decisions: "Approve", "Reject", "Escalate"
     
-    Use SearchPolicy at most once per episode, and only when rule_keyword is "hidden"
-    (medium/hard tasks). Use short queries: meal, large meal, gst, cab, international.
+    EASY tasks: rule_keyword is visible — never use SearchPolicy; Resolve directly.
+    MEDIUM/HARD: use SearchPolicy at most once when rule_keyword is "hidden".
+    Use short queries: meal, large meal, gst, cab, international.
     After policy_retrieved is true, never search again. Use RequestInformation only when
-    missing_document is set (not null). After a document response, ResolveTicket immediately.
+    missing_document is set (not null). If env_message says a document was not provided,
+    Reject (do not Approve). After a document response, ResolveTicket immediately.
     
     Respond with ONLY a valid action in JSON format:
     {"action_type": "...", "query": "...", "message": "...", "decision": "...", "reason": "..."}
@@ -69,14 +78,21 @@ SYSTEM_PROMPT = textwrap.dedent(
 ).strip()
 
 
-def build_user_prompt(observation: Dict, step: int) -> str:
+def build_user_prompt(
+    observation: Dict, step: int, task_id: str = "medium"
+) -> str:
     """Build the user prompt from the current observation (no curriculum labels)."""
     max_steps = int(observation.get("max_steps") or MAX_STEPS_PER_TASK)
     steps_remaining = (max_steps - step + 1)
     
     policy_retrieved = bool(observation.get("policy_retrieved"))
     missing_doc = observation.get("missing_document")
-    policy_note = ""
+    policy_note = task_prompt_prefix(task_id, observation)
+    if policy_retrieved and document_unavailable(observation):
+        policy_note += (
+            "\nEnvironment says the requested document was NOT provided. "
+            "Resolve with Reject (GST/meal rules), not Approve."
+        )
     if policy_retrieved:
         if missing_doc:
             if missing_doc == "required":
@@ -138,35 +154,45 @@ def build_user_prompt(observation: Dict, step: int) -> str:
     return prompt
 
 
-def rule_based_fallback(observation: Dict) -> Dict:
-    """
-    Rule-based fallback decision when LLM fails.
-    Uses policy rules to make a reasonable decision.
-    """
+def rule_based_fallback(
+    observation: Dict, task_id: str = "medium", claim: Optional[Dict[str, Any]] = None
+) -> Dict:
+    """Rule-based fallback when LLM output is invalid."""
     amount = observation.get("amount", 0)
     level = observation.get("employee_level", "L1")
     has_receipt = observation.get("has_receipt", False)
     missing_doc = observation.get("missing_document")
     rule_keyword = (observation.get("rule_keyword") or "").lower()
-    description = observation.get("description", "").lower()
-    
-    # Check for alcohol or personal items
+    description = (observation.get("description") or "").lower()
+    policy_retrieved = bool(observation.get("policy_retrieved"))
+
     if "alcohol" in description or "gift" in description or "shopping" in description:
         return {
             "action_type": "ResolveTicket",
             "decision": "Reject",
             "reason": "Policy violation: alcohol/gift/personal items not approved",
         }
-    
-    # VP and above always escalate
-    if level in ["L7", "L8", "L9"]:
+
+    try:
+        if int(str(level).replace("L", "")) >= 7:
+            return {
+                "action_type": "ResolveTicket",
+                "decision": "Escalate",
+                "reason": "High-level employee claim requires escalation",
+            }
+    except ValueError:
+        pass
+
+    if rule_keyword == "hidden" and not policy_retrieved and task_id != "easy":
         return {
-            "action_type": "ResolveTicket",
-            "decision": "Escalate",
-            "reason": "High-level employee claim requires escalation",
+            "action_type": "SearchPolicy",
+            "query": search_query_for_hidden_policy(observation, claim),
         }
-    
-    # If missing documents, request them
+
+    resolved = resolve_after_missing_document(observation, claim)
+    if resolved:
+        return resolved
+
     if missing_doc:
         if missing_doc == "required":
             missing_doc = infer_required_document(observation)
@@ -174,23 +200,29 @@ def rule_based_fallback(observation: Dict) -> Dict:
             "action_type": "RequestInformation",
             "message": f"Please provide {missing_doc}",
         }
-    
-    # Meals and travel rules
-    if amount < 500:
-        return {
-            "action_type": "ResolveTicket",
-            "decision": "Approve",
-            "reason": "Amount below ₹500 threshold, no receipt required",
-        }
-    
-    if amount >= 500 and not has_receipt:
+
+    rule = effective_rule_keyword(observation, claim)
+    if rule == "gst" or (claim or {}).get("policy_category") == "gst":
         return {
             "action_type": "ResolveTicket",
             "decision": "Reject",
-            "reason": "Receipt required for amounts above ₹500",
+            "reason": "GST invoice missing (Rule 12)",
         }
-    
-    # Default approval for compliant claims
+
+    if task_id == "easy" or policy_retrieved:
+        if amount < 500:
+            return {
+                "action_type": "ResolveTicket",
+                "decision": "Approve",
+                "reason": "Amount below ₹500 threshold, no receipt required",
+            }
+        if amount >= 500 and not has_receipt:
+            return {
+                "action_type": "ResolveTicket",
+                "decision": "Reject",
+                "reason": "Receipt required for amounts above ₹500",
+            }
+
     return {
         "action_type": "ResolveTicket",
         "decision": "Approve",
@@ -226,7 +258,7 @@ def run_episode(
     for step in range(1, max_steps + 1):
         # Build prompt for LLM
         obs_dict = observation.model_dump() if hasattr(observation, 'model_dump') else observation.__dict__
-        user_prompt = build_user_prompt(obs_dict, step)
+        user_prompt = build_user_prompt(obs_dict, step, task_id=task_id)
 
         # Call LLM
         try:
@@ -249,7 +281,8 @@ def run_episode(
         except Exception:
             obs_dict = observation.model_dump() if hasattr(observation, "model_dump") else observation.__dict__
             action_data = parse_model_action(
-                json.dumps(rule_based_fallback(obs_dict)), obs_dict
+                json.dumps(rule_based_fallback(obs_dict, task_id=task_id, claim=claim)),
+                obs_dict,
             )
             action = ComplianceAction(**action_data)
             step_result = client.step(action)

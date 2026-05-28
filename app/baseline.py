@@ -6,12 +6,19 @@ Uses WebSocket client (ComplianceEnvClient) for stateful multi-step episodes.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.client import ComplianceEnvClient
+from app.agent_helpers import (
+    document_unavailable as _document_unavailable,
+    effective_rule_keyword as _effective_rule_keyword,
+    resolve_after_missing_document as _resolve_after_missing_document,
+    search_query_for_hidden_policy as _search_query_for_hidden_policy,
+)
 from app.document_utils import infer_required_document as _infer_required_document
 from app.graders import grade_episode
 from app.models import ComplianceAction, ActionType, TicketDecision
@@ -47,6 +54,7 @@ class BaselineAgent:
         self.api_url = api_url
         self._client: Optional[ComplianceEnvClient] = None
         self._sync = None
+        self._active_claim: Optional[Dict[str, Any]] = None
 
     def _obs_dict(self, observation: Any) -> Dict[str, Any]:
         if hasattr(observation, "model_dump"):
@@ -62,6 +70,9 @@ class BaselineAgent:
         employee_level = observation.get("employee_level", "L3")
         description = (observation.get("description") or "").lower()
         rule_keyword = (observation.get("rule_keyword") or "").lower()
+        policy_retrieved = bool(observation.get("policy_retrieved"))
+        effective_rule = _effective_rule_keyword(observation, self._active_claim)
+        claim = self._active_claim or {}
 
         try:
             level_num = int(str(employee_level).replace("L", ""))
@@ -88,19 +99,11 @@ class BaselineAgent:
                 "reason": "Personal expense (Rule 15)",
             }
 
-        if str(observation.get("rule_keyword", "")).lower() == "hidden":
-            query = "policy"
-            if "cab" in description or "ride" in description:
-                query = (
-                    "daytime cab"
-                    if "before" in description or "business hours" in description
-                    else "cab"
-                )
-            elif "meal" in description or "dinner" in description or "lunch" in description:
-                query = "meal"
-            elif rule_keyword and rule_keyword != "hidden":
-                query = rule_keyword
-            return {"action_type": "SearchPolicy", "query": query}
+        if rule_keyword == "hidden" and not policy_retrieved:
+            return {
+                "action_type": "SearchPolicy",
+                "query": _search_query_for_hidden_policy(observation, claim),
+            }
 
         if missing_doc and missing_doc not in (None, "required"):
             return {
@@ -111,6 +114,17 @@ class BaselineAgent:
             return {
                 "action_type": "RequestInformation",
                 "message": f"Please provide {_infer_required_document(observation)}",
+            }
+
+        resolved = _resolve_after_missing_document(observation, claim)
+        if resolved:
+            return resolved
+
+        if effective_rule == "gst" or claim.get("policy_category") == "gst":
+            return {
+                "action_type": "ResolveTicket",
+                "decision": "Reject",
+                "reason": "GST invoice missing (Rule 12)",
             }
 
         if "meal" in description or "lunch" in description or "dinner" in description:
@@ -179,6 +193,7 @@ class BaselineAgent:
     ) -> Dict[str, Any]:
         """Run one full episode via WebSocket client."""
         log_episode_start(task_id, model="baseline-agent")
+        self._active_claim = claim
 
         reset_kwargs: Dict[str, Any] = {"task_id": task_id}
         if claim_id:

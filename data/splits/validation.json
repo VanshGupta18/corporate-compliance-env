@@ -284,8 +284,8 @@
       "task_difficulty": "hard",
       "amount": 3562,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -1247,8 +1247,8 @@
       "task_difficulty": "hard",
       "amount": 4334,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -1454,8 +1454,8 @@
       "task_difficulty": "hard",
       "amount": 4402,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -1522,8 +1522,8 @@
       "task_difficulty": "hard",
       "amount": 4280,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -2004,8 +2004,8 @@
       "task_difficulty": "hard",
       "amount": 3352,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     },
     {
@@ -2762,8 +2762,8 @@
       "task_difficulty": "hard",
       "amount": 4360,
       "rule_keyword": "large meal",
-      "ground_truth_decision": "Approve",
-      "ground_truth_reason": "No violation.",
+      "ground_truth_decision": "Reject",
+      "ground_truth_reason": "Rule 3: Manager note required.",
       "notes": "Hard: doc_missing_reject"
     }
   ]
