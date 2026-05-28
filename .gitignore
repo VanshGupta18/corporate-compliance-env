@@ -74,6 +74,9 @@ data/temp_*.json
 
 # ── Runtime / training artifacts (regenerate locally) ──
 # Root benchmark JSON + run logs are committed for HF /dashboard.
+!baseline_results.json
+!inference_results.json
+!training_results.json
 training/data/
 training/logs/
 training/checkpoints/

@@ -34,7 +34,7 @@ from app.paths import (
 from app.policy_snippets import POLICY_SNIPPETS, match_policy_snippet
 
 _CLAIM_RUN_RE = re.compile(
-    r"Running (?:inference|baseline) for claim\s+([A-Z0-9-]+)\s+\((easy|medium|hard)\)\.\.\.",
+    r"Running (?:inference|baseline|training) for claim\s+([A-Z0-9-]+)\s+\((easy|medium|hard)\)\.\.\.",
     re.IGNORECASE,
 )
 
@@ -228,7 +228,7 @@ def _action_fields_from_dict(payload: Dict[str, Any]) -> Dict[str, Any]:
     for key in ("query", "message", "decision", "reason"):
         val = payload.get(key)
         if val is not None and str(val).strip():
-            fields[key] = str(val)
+            fields[key] = _normalize_decision(val) if key == "decision" else str(val)
     if action_type == "SEARCH_POLICY" and fields.get("query"):
         rk = str(payload.get("_rule_keyword") or payload.get("rule_keyword") or "")
         if rk:
@@ -249,6 +249,23 @@ def _normalize_action(action: str) -> str:
         "RESOLVE_TICKET": "RESOLVE_TICKET",
     }
     return m.get(a, a.upper())
+
+
+def _normalize_decision(decision: Any) -> str:
+    """Strip TicketDecision.APPROVE-style enums to Approve/Reject/Escalate."""
+    if decision is None:
+        return ""
+    text = str(decision).strip()
+    if not text:
+        return ""
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    key = text.upper()
+    return {
+        "APPROVE": "Approve",
+        "REJECT": "Reject",
+        "ESCALATE": "Escalate",
+    }.get(key, text if text[:1].isupper() else text.capitalize())
 
 
 def _parse_episode_log(path: Path, method: str) -> Tuple[List[Dict], List[Dict]]:
@@ -307,6 +324,8 @@ def _parse_episode_log(path: Path, method: str) -> Tuple[List[Dict], List[Dict]]
             current["steps"] = max(current["steps"], step_num)
             current["total_reward"] = round(current["total_reward"] + reward, 4)
             extras = _parse_step_params(step_m.group(5) or "")
+            if extras.get("decision"):
+                extras["decision"] = _normalize_decision(extras["decision"])
             action_row = {
                 "method": method,
                 "episode_id": current["episode_id"],
@@ -489,13 +508,18 @@ def _load_dashboard_data() -> Dict[str, Any]:
     training = _training_metrics(training_rows)
     if training.total == 0 and training_metrics_file.total > 0:
         training = training_metrics_file
-    t_eps, t_acts = _training_frames(training_rows)
-    if not t_eps and t_log_eps:
+    if t_log_eps:
         t_eps, t_acts = t_log_eps, t_log_acts
+    else:
+        t_eps, t_acts = _training_frames(training_rows)
 
     claims_idx = _load_claims_index()
     all_eps = _enrich_episodes(b_eps + i_eps + t_eps, claims_idx)
     all_acts = b_acts + i_acts + t_acts
+    for action in all_acts:
+        action["action_type"] = _normalize_action(str(action.get("action_type", "")))
+        if action.get("decision") is not None:
+            action["decision"] = _normalize_decision(action["decision"])
     _enrich_action_policies(all_eps, all_acts)
 
     learning = [
@@ -729,6 +753,7 @@ a{color:var(--blue);text-decoration:none}
 .step-detail{font-size:12px;color:var(--muted);margin-top:3px;margin-left:33px;line-height:1.4}
 .dec-chip{display:inline-block;margin-top:5px;margin-left:33px;padding:4px 12px;
   border-radius:8px;font-size:13px;font-weight:700}
+.dec-inline{margin-top:0;margin-left:8px;vertical-align:middle}
 .dec-Approve{background:rgba(39,174,96,.2);color:#2ecc71}
 .dec-Reject{background:rgba(231,76,60,.18);color:#e74c3c}
 .dec-Escalate{background:rgba(243,156,18,.18);color:#f39c12}
@@ -813,6 +838,22 @@ const fmtRs=v=>'\u20b9'+Number(v||0).toLocaleString('en-IN');
 const scoreColor=v=>v>=0.7?'#27ae60':v>=0.4?'#f39c12':'#e74c3c';
 const aBorder=t=>t==='SEARCH_POLICY'?'#378ADD':t==='REQUEST_INFORMATION'?'#f39c12':'#27ae60';
 const aLabel=t=>t==='SEARCH_POLICY'?'Search Policy':t==='REQUEST_INFORMATION'?'Request Information':'Resolve Ticket';
+function fmtDecision(d){
+  if(d==null||d===undefined)return '';
+  let s=String(d).trim();
+  if(!s)return '';
+  if(s.indexOf('TicketDecision.')===0)s=s.slice(15);
+  else if(s.indexOf('.')>=0)s=s.split('.').pop();
+  const m={APPROVE:'Approve',REJECT:'Reject',ESCALATE:'Escalate'};
+  const u=s.toUpperCase();
+  return m[u]||m[s]||(s.charAt(0).toUpperCase()+s.slice(1).toLowerCase());
+}
+function DecisionChip({decision,inline}){
+  const d=fmtDecision(decision);
+  if(!d)return null;
+  const cls='dec-chip dec-'+d+(inline?' dec-inline':'');
+  return h('span',{className:cls},d);
+}
 const aIconCls=t=>t==='SEARCH_POLICY'?'search':t==='REQUEST_INFORMATION'?'request':'resolve';
 const aIconTxt=t=>t==='SEARCH_POLICY'?'SP':t==='REQUEST_INFORMATION'?'RI':'RV';
 
@@ -1111,10 +1152,13 @@ function StepCard({action,vis,expectedSearch}){
   const r=action.reward||0;
   const rc=r>0.05?'r-pos':r<-0.05?'r-neg':'r-zero';
   const isSearch=t==='SEARCH_POLICY';
+  const isResolve=t==='RESOLVE_TICKET';
   return h('div',{className:'step-card',style:{borderLeftColor:aBorder(t)}},
     h('div',{className:'step-hdr'},
       h('div',{className:'step-dot'},action.step),
-      h('div',{className:'step-lbl'},h(ActionIcon,{type:t}),aLabel(t)),
+      h('div',{className:'step-lbl'},
+        h(ActionIcon,{type:t}),aLabel(t),
+        isResolve?h(DecisionChip,{decision:action.decision,inline:true}):null),
       h('div',{className:'r-badge '+rc},(r>0?'+':'')+r.toFixed(2))
     ),
     isSearch?h('div',{className:'step-detail policy-search'},
@@ -1130,7 +1174,6 @@ function StepCard({action,vis,expectedSearch}){
         ?h('span',{className:'tag tag-miss'},'relevance unknown'):null
     ):null,
     !isSearch&&action.query?h('div',{className:'step-detail'},'Query: \u201c'+action.query+'\u201d'):null,
-    action.decision?h('div',{className:'dec-chip dec-'+action.decision},action.decision):null,
     action.message?h('div',{className:'step-detail'},'Requested: \u201c'+action.message+'\u201d'):null,
     action.reason?h('div',{className:'step-detail'},'Reason: '+action.reason):null
   );
@@ -1214,7 +1257,7 @@ catch(e){document.getElementById('root').innerHTML='<div style="padding:40px;col
 
 # ── Cache ──────────────────────────────────────────────────────────────────────
 _cache: tuple[str, float] = ("", 0.0)
-_CACHE_TTL = 5.0
+_CACHE_TTL = 2.0
 
 
 def _render_dashboard() -> str:

@@ -24,10 +24,33 @@ class Tee:
         for stream in self.streams:
             stream.flush()
 
+    def close(self) -> None:
+        """No-op so logging.shutdown does not fail when stdout is tee'd."""
+
+
+def _log_field(value: Any) -> str:
+    """Serialize action fields for [STEP] lines (enum-safe, no TicketDecision.APPROVE)."""
+    if value is None:
+        return ""
+    if hasattr(value, "value"):
+        return str(value.value)
+    text = str(value).strip()
+    if "." in text and text.split(".", 1)[0] in ("TicketDecision", "ActionType"):
+        text = text.rsplit(".", 1)[-1]
+    if text in ("APPROVE", "REJECT", "ESCALATE"):
+        return text.capitalize()
+    if text == "RESOLVE_TICKET":
+        return "ResolveTicket"
+    if text == "SEARCH_POLICY":
+        return "SearchPolicy"
+    if text == "REQUEST_INFORMATION":
+        return "RequestInformation"
+    return text
+
 
 def format_step_log(step: int, action: Dict[str, Any], reward: float, done: bool) -> str:
     """Single-line [STEP] record consumed by the dashboard log parser."""
-    action_type = action.get("action_type", "")
+    action_type = _log_field(action.get("action_type", ""))
     parts = [
         f"[STEP] step={step}",
         f"action={action_type}",
@@ -41,7 +64,7 @@ def format_step_log(step: int, action: Dict[str, Any], reward: float, done: bool
         m = str(action["message"]).replace('"', "'")
         parts.append(f'message="{m}"')
     if action.get("decision") is not None:
-        parts.append(f"decision={action['decision']}")
+        parts.append(f"decision={_log_field(action['decision'])}")
     if action.get("reason"):
         r = str(action["reason"]).replace('"', "'")[:120]
         parts.append(f'reason="{r}"')

@@ -15,7 +15,13 @@ from typing import Any, Dict, List, Optional, Protocol
 
 import torch
 
-from app.graders import grade_episode
+from app.graders import (
+    episode_success,
+    final_resolve_action,
+    grade_episode,
+    normalize_actions_history,
+    normalize_decision_value,
+)
 from app.models import ComplianceAction
 from app.paths import TRAINING_EPISODES, TRAINING_LOG, TRAINING_RESULTS
 from app.run_logging import (
@@ -53,7 +59,7 @@ class EnvRunner(Protocol):
 
 
 class LocalEnvRunner:
-    def __init__(self, split: str = "validation"):
+    def __init__(self, split: str = "test"):
         self.env = ComplianceEnv()
         self.split = split
         self._claim: Dict[str, Any] = {}
@@ -83,7 +89,7 @@ class LocalEnvRunner:
 
 
 class WebSocketEnvRunner:
-    def __init__(self, api_url: str, split: str = "validation"):
+    def __init__(self, api_url: str, split: str = "test"):
         from app.client import ComplianceEnvClient
 
         self._client_ctx = ComplianceEnvClient(base_url=api_url)
@@ -98,7 +104,11 @@ class WebSocketEnvRunner:
             kwargs["claim_id"] = claim_id
         result = self.client.reset(**kwargs)
         obs = result.observation.model_dump()
-        self._claim = dict(self._claims_by_id.get(claim_id, {})) if claim_id else {}
+        if claim_id:
+            self._claim = dict(self._claims_by_id.get(claim_id, {}))
+        else:
+            ticket_id = obs.get("ticket_id")
+            self._claim = dict(self._claims_by_id.get(ticket_id, {}))
         return obs, result.done
 
     def step(
@@ -167,6 +177,12 @@ def generate_action(
     return parse_model_action(text, observation)
 
 
+def _action_for_log(action: Dict[str, Any], observation: Dict[str, Any]) -> Dict[str, Any]:
+    """JSON-safe action dict for [STEP] lines (dashboard parser)."""
+    payload = normalize_compliance_action(action, observation)
+    return ComplianceAction(**payload).model_dump(mode="json")
+
+
 def run_episode(
     runner: EnvRunner,
     model,
@@ -189,24 +205,25 @@ def run_episode(
     while not done and steps < max_steps:
         steps += 1
         action = generate_action(model, tokenizer, task_id, observation)
+        log_action = _action_for_log(action, observation)
         observation, reward, done = runner.step(action, observation)
         rewards.append(float(reward))
         if log_to_stdout:
-            print(format_step_log(steps, action, reward, done), flush=True)
+            print(format_step_log(steps, log_action, reward, done), flush=True)
         trajectory.append(
             {
                 "step": steps,
-                "action_type": action.get("action_type"),
-                "query": action.get("query"),
-                "message": action.get("message"),
-                "decision": action.get("decision"),
-                "reason": action.get("reason"),
+                "action_type": log_action.get("action_type"),
+                "query": log_action.get("query"),
+                "message": log_action.get("message"),
+                "decision": log_action.get("decision"),
+                "reason": log_action.get("reason"),
                 "reward": reward,
                 "done": done,
             }
         )
 
-    actions_history = runner.actions_history()
+    actions_history = normalize_actions_history(runner.actions_history())
     episode_claim = claim or getattr(runner, "claim", {}) or {}
     gt = episode_claim.get("ground_truth_decision", "Approve")
     grader = grade_episode(
@@ -217,7 +234,9 @@ def run_episode(
     )
     action_counts = {
         "SearchPolicy": sum(
-            1 for action in actions_history if action.get("action_type") == "SearchPolicy"
+            1
+            for action in actions_history
+            if action.get("action_type") == "SearchPolicy"
         ),
         "RequestInformation": sum(
             1
@@ -225,14 +244,17 @@ def run_episode(
             if action.get("action_type") == "RequestInformation"
         ),
         "ResolveTicket": sum(
-            1 for action in actions_history if action.get("action_type") == "ResolveTicket"
+            1
+            for action in actions_history
+            if action.get("action_type") == "ResolveTicket"
         ),
     }
-    final_resolve = next(
-        (a for a in reversed(actions_history) if a.get("action_type") == "ResolveTicket"),
-        None,
+    final_resolve = final_resolve_action(actions_history)
+    final_decision = (
+        normalize_decision_value(final_resolve.get("decision"))
+        if isinstance(final_resolve, dict)
+        else None
     )
-    final_decision = final_resolve.get("decision") if isinstance(final_resolve, dict) else None
     loop_flag = action_counts["RequestInformation"] >= 2 and action_counts["ResolveTicket"] == 0
     required_document = episode_claim.get("missing_document") or episode_claim.get(
         "required_document"
@@ -240,7 +262,8 @@ def run_episode(
     components = grader.get("components", {})
 
     score = float(grader["score"])
-    success = bool(final_decision and str(final_decision) == str(gt))
+    decision_correct = episode_success(grader, done=done)
+    success = decision_correct
     if log_to_stdout:
         log_episode_end(
             steps=steps,
@@ -265,7 +288,7 @@ def run_episode(
         "grader_components": components,
         "action_counts": action_counts,
         "final_decision": final_decision,
-        "decision_correct": success,
+        "decision_correct": decision_correct,
         "request_loop": loop_flag,
         "truncated_max_steps": bool(steps >= max_steps and not final_resolve),
         "required_document": required_document,
@@ -293,13 +316,19 @@ def load_baseline_scores(path: str) -> Dict[str, float]:
 
 
 def _run_eval(args: argparse.Namespace) -> None:
-    log_path = Path(args.episode_log_file)
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    if args.clear_log and log_path.exists():
-        log_path.unlink()
+    episode_log_path = Path(args.episode_log_file)
+    episode_log_path.parent.mkdir(parents=True, exist_ok=True)
+    if args.clear_log:
+        if episode_log_path.exists():
+            episode_log_path.unlink()
+        run_log_path = Path(args.run_log_file)
+        if run_log_path.exists() and not args.no_tee:
+            run_log_path.unlink()
 
     model, tokenizer = load_model_and_tokenizer(args.checkpoint)
     claims = load_split_claims(args.split)
+    if args.limit and args.limit > 0:
+        claims = claims[: args.limit]
     use_local = not args.use_remote_env
 
     report: Dict[str, List[float]] = {t: [] for t in TASKS}
@@ -315,17 +344,20 @@ def _run_eval(args: argparse.Namespace) -> None:
 
     try:
         for runner in runners:
-            for task_id in TASKS:
-                task_claims = [c for c in claims if c.get("task_difficulty") == task_id]
-                n = min(args.episodes, len(task_claims) or args.episodes)
-                for i in range(n):
-                    claim = task_claims[i % len(task_claims)] if task_claims else None
-                    episode_idx += 1
-                    episode = run_episode(runner, model, tokenizer, task_id, claim=claim)
-                    report[task_id].append(episode["grader_score"])
-                    episode_metrics[task_id].append(episode)
-                    episode["episode_index"] = episode_idx
-                    append_episode_jsonl(log_path, episode)
+            for claim in claims:
+                task_id = str(claim.get("task_difficulty", "easy")).lower()
+                episode_idx += 1
+                try:
+                    episode = run_episode(
+                        runner, model, tokenizer, task_id, claim=claim
+                    )
+                except Exception as exc:
+                    print(f"Error on {claim.get('id', '?')}: {exc}", flush=True)
+                    continue
+                report[task_id].append(episode["grader_score"])
+                episode_metrics[task_id].append(episode)
+                episode["episode_index"] = episode_idx
+                append_episode_jsonl(episode_log_path, episode)
     finally:
         if not use_local and isinstance(runners[0], WebSocketEnvRunner):
             runners[0].close()
@@ -347,7 +379,7 @@ def _run_eval(args: argparse.Namespace) -> None:
                 for episode in episodes
             )
             escalate_rate = mean(
-                1.0 if str(episode.get("final_decision")) == "Escalate" else 0.0
+                1.0 if episode.get("final_decision") == "Escalate" else 0.0
                 for episode in episodes
             )
             print(
@@ -368,6 +400,19 @@ def _run_eval(args: argparse.Namespace) -> None:
                     f"{task_id}: baseline_mean={baseline:.3f} delta={delta:+.3f} gate={gate}"
                 )
     flat = [s for scores in report.values() for s in scores]
+    metrics = {
+        "overall_metrics": {
+            "total_claims": len(flat),
+            "mean_grader_score": sum(flat) / len(flat) if flat else 0.0,
+        },
+        "performance_by_difficulty": {},
+    }
+    for diff, scores in report.items():
+        metrics["performance_by_difficulty"][diff] = {
+            "mean_grader_score": sum(scores) / len(scores) if scores else 0.0,
+            "total": len(scores),
+        }
+
     if flat:
         print(f"overall_grader_mean={mean(flat):.3f}")
 
@@ -378,6 +423,20 @@ def _run_eval(args: argparse.Namespace) -> None:
     )
     print(f"[SAVED] {args.results_file}", flush=True)
     print(f"[SAVED] episode log: {args.episode_log_file}", flush=True)
+
+    print("\n[SUMMARY] Training Results:", flush=True)
+    print(
+        f"  OVERALL: {metrics['overall_metrics']['mean_grader_score']:.3f} "
+        f"(n={metrics['overall_metrics']['total_claims']})",
+        flush=True,
+    )
+    for diff in TASKS:
+        d = metrics["performance_by_difficulty"].get(diff, {})
+        if d.get("total"):
+            print(
+                f"  {diff.upper()}: {d['mean_grader_score']:.3f} (n={d['total']})",
+                flush=True,
+            )
 
 
 def main() -> None:
@@ -395,8 +454,19 @@ def main() -> None:
         action="store_true",
         help="Evaluate via WebSocket server at --api-url.",
     )
-    parser.add_argument("--episodes", type=int, default=10)
-    parser.add_argument("--split", default="validation")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Max claims to evaluate (0 = all claims in split).",
+    )
+    parser.add_argument(
+        "--episodes",
+        type=int,
+        default=0,
+        help="Deprecated alias for --limit (per-task cap removed).",
+    )
+    parser.add_argument("--split", default="test")
     parser.add_argument("--episode-log-file", default=str(TRAINING_EPISODES))
     parser.add_argument("--results-file", default=str(TRAINING_RESULTS))
     parser.add_argument("--run-log-file", default=str(TRAINING_LOG))
@@ -408,6 +478,8 @@ def main() -> None:
         help="Do not write training_run.log (stdout only).",
     )
     args = parser.parse_args()
+    if args.episodes and not args.limit:
+        args.limit = args.episodes
 
     if args.no_tee:
         _run_eval(args)

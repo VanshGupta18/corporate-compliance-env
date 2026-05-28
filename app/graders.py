@@ -8,17 +8,78 @@ from typing import Any, Dict, List, Optional
 
 from app.policy_snippets import match_policy_snippet
 
+_ACTION_TYPE_ALIASES = {
+    "SEARCH_POLICY": "SearchPolicy",
+    "REQUEST_INFORMATION": "RequestInformation",
+    "RESOLVE_TICKET": "ResolveTicket",
+}
 
-def _final_resolve(actions_history: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+
+def normalize_action_type_value(action_type: Any) -> str:
+    """Coerce ActionType enums / reprs to SearchPolicy | RequestInformation | ResolveTicket."""
+    if action_type is None:
+        return ""
+    if hasattr(action_type, "value"):
+        action_type = action_type.value
+    text = str(action_type).strip()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    return _ACTION_TYPE_ALIASES.get(text.upper(), text)
+
+
+def normalize_decision_value(decision: Any) -> Optional[str]:
+    """Coerce TicketDecision enums / reprs to Approve | Reject | Escalate."""
+    if decision is None:
+        return None
+    if hasattr(decision, "value"):
+        decision = decision.value
+    text = str(decision).strip()
+    if "." in text:
+        text = text.rsplit(".", 1)[-1]
+    key = text.upper()
+    return {
+        "APPROVE": "Approve",
+        "REJECT": "Reject",
+        "ESCALATE": "Escalate",
+    }.get(key, text if text[:1].isupper() else text.capitalize())
+
+
+def normalize_history_action(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a copy of one actions_history row with string action_type and decision."""
+    out = dict(row)
+    if "action_type" in out:
+        out["action_type"] = normalize_action_type_value(out.get("action_type"))
+    if "decision" in out:
+        out["decision"] = normalize_decision_value(out.get("decision"))
+    return out
+
+
+def normalize_actions_history(actions_history: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    return [normalize_history_action(row) for row in actions_history]
+
+
+def final_resolve_action(actions_history: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     for action in reversed(actions_history):
-        if action.get("action_type") == "ResolveTicket":
+        if normalize_action_type_value(action.get("action_type")) == "ResolveTicket":
             return action
     return None
 
 
+def episode_success(grader_result: Dict[str, Any], *, done: bool = True) -> bool:
+    """Match inference.py: episode succeeded when terminal and grader awarded correct_decision."""
+    if not done:
+        return False
+    components = grader_result.get("components") or {}
+    return float(components.get("correct_decision", 0.0) or 0.0) > 0.0
+
+
+def _final_resolve(actions_history: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    return final_resolve_action(actions_history)
+
+
 def _useful_search(actions_history: List[Dict[str, Any]], rule_keyword: str) -> bool:
     for action in actions_history:
-        if action.get("action_type") != "SearchPolicy":
+        if normalize_action_type_value(action.get("action_type")) != "SearchPolicy":
             continue
         query = action.get("query") or ""
         _, relevant = match_policy_snippet(rule_keyword, query)
@@ -36,7 +97,7 @@ def _correct_document_request(
     req_space = required.replace("_", " ").lower()
     req_compact = req_space.replace(" ", "")
     for action in actions_history:
-        if action.get("action_type") != "RequestInformation":
+        if normalize_action_type_value(action.get("action_type")) != "RequestInformation":
             continue
         msg = (action.get("message") or "").lower()
         msg_compact = msg.replace("_", "").replace(" ", "")
@@ -46,7 +107,11 @@ def _correct_document_request(
 
 
 def _decision_matches(decision: Any, ground_truth_decision: str) -> bool:
-    return decision == ground_truth_decision or str(decision) == str(ground_truth_decision)
+    left = normalize_decision_value(decision)
+    right = normalize_decision_value(ground_truth_decision)
+    if left is None or right is None:
+        return False
+    return left == right
 
 
 def grade_easy(
@@ -65,7 +130,8 @@ def grade_easy(
         return {"score": 0.01, "components": components}
 
     unnecessary = any(
-        a.get("action_type") in ("SearchPolicy", "RequestInformation")
+        normalize_action_type_value(a.get("action_type"))
+        in ("SearchPolicy", "RequestInformation")
         for a in actions_history[:-1]
     )
     components["no_unnecessary_tools"] = 0.0 if unnecessary else 0.15
@@ -179,6 +245,9 @@ def grade_episode(
     claim: Optional[Dict[str, Any]] = None,
     requested_document: bool = False,
 ) -> Dict[str, Any]:
+    actions_history = normalize_actions_history(actions_history)
+    gt_norm = normalize_decision_value(ground_truth_decision)
+    ground_truth_decision = gt_norm if gt_norm else str(ground_truth_decision or "Approve")
     if task_id == "easy":
         result = grade_easy(actions_history, ground_truth_decision, claim)
     elif task_id == "medium":

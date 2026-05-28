@@ -289,7 +289,7 @@ def run_episode(
             observation = step_result.observation
             reward = step_result.reward or 0.0
             
-            print(format_step_log(step, action.model_dump(), reward, step_result.done), flush=True)
+            print(format_step_log(step, action.model_dump(mode="json"), reward, step_result.done), flush=True)
 
             action_data["reward"] = reward
             episode_data["steps"].append(action_data)
@@ -306,7 +306,7 @@ def run_episode(
         observation = step_result.observation
         reward = step_result.reward or 0.0
 
-        print(format_step_log(step, action.model_dump(), reward, step_result.done), flush=True)
+        print(format_step_log(step, action.model_dump(mode="json"), reward, step_result.done), flush=True)
 
         action_data["reward"] = reward
         episode_data["steps"].append(action_data)
