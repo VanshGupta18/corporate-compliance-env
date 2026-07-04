@@ -90,3 +90,5 @@ dmypy.json
 # ── PyCharm ───────────────────────────────────────────
 .idea/
 *.iws
+
+graphify-out/ 
