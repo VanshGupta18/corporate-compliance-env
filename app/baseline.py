@@ -18,6 +18,7 @@ from app.agent_helpers import (
     effective_rule_keyword as _effective_rule_keyword,
     resolve_after_missing_document as _resolve_after_missing_document,
     search_query_for_hidden_policy as _search_query_for_hidden_policy,
+    _needs_policy_search,
 )
 from app.document_utils import infer_required_document as _infer_required_document
 from app.graders import grade_episode
@@ -69,11 +70,11 @@ class BaselineAgent:
         missing_doc = observation.get("missing_document")
         employee_level = observation.get("employee_level", "L3")
         description = (observation.get("description") or "").lower()
-        rule_keyword = (observation.get("rule_keyword") or "").lower()
         policy_retrieved = bool(observation.get("policy_retrieved"))
         effective_rule = _effective_rule_keyword(observation, self._active_claim)
         claim = self._active_claim or {}
 
+        # L7+ always escalate — immediately visible from observation
         try:
             level_num = int(str(employee_level).replace("L", ""))
             if level_num >= 7:
@@ -85,26 +86,28 @@ class BaselineAgent:
         except (ValueError, IndexError):
             pass
 
+        # Clear-cut rejections readable from description alone
         if "alcohol" in description or "wine" in description or "beer" in description:
             return {
                 "action_type": "ResolveTicket",
                 "decision": "Reject",
                 "reason": "Alcohol prohibited (Rule 4)",
             }
-
-        if "personal" in rule_keyword or "gym" in description:
+        if "gym" in description or effective_rule == "personal" or claim.get("policy_category") == "personal":
             return {
                 "action_type": "ResolveTicket",
                 "decision": "Reject",
                 "reason": "Personal expense (Rule 15)",
             }
 
-        if rule_keyword == "hidden" and not policy_retrieved:
+        # Search when claim content implies a policy threshold we haven't checked yet
+        if not policy_retrieved and _needs_policy_search(observation, claim):
             return {
                 "action_type": "SearchPolicy",
                 "query": _search_query_for_hidden_policy(observation, claim),
             }
 
+        # Request missing document once policy is known
         if missing_doc and missing_doc not in (None, "required"):
             return {
                 "action_type": "RequestInformation",

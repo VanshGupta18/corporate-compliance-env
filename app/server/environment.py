@@ -156,9 +156,6 @@ class ComplianceEnv(Environment):
             if not action.query:
                 reward = -0.1
                 self._env_message = "SearchPolicy requires a non-empty query."
-            elif task_id == "easy":
-                reward = -0.15
-                self._env_message = "Easy tasks do not require policy search. Resolve directly."
             elif self._has_searched_policy():
                 reward = -0.35 if self._ever_useful_search else -0.25
                 self._env_message = (
@@ -178,63 +175,59 @@ class ComplianceEnv(Environment):
             return self._finalize_step(reward, action)
 
         if action.action_type == "RequestInformation":
-            if task_id == "easy":
-                reward = -0.15
-                self._env_message = "Easy tasks do not require document requests."
-            else:
-                required = (
-                    claim.get("missing_document")
-                    or claim.get("required_document")
+            required = (
+                claim.get("missing_document")
+                or claim.get("required_document")
+            )
+            msg = (action.message or "").lower()
+            if not required:
+                reward = -0.2
+                self._env_message = "No missing document on this ticket."
+            elif self._document_satisfied:
+                reward = -0.2
+                self._env_message = (
+                    "Required document already received. Resolve the ticket now."
                 )
-                msg = (action.message or "").lower()
-                if not required:
-                    reward = -0.2
-                    self._env_message = "No missing document on this ticket."
-                elif self._document_satisfied:
-                    reward = -0.2
-                    self._env_message = (
-                        "Required document already received. Resolve the ticket now."
-                    )
-                elif self._document_request_resolved:
-                    reward = -0.3
-                    self._env_message = (
-                        "Document already requested. Resolve the ticket now "
-                        "(Approve/Reject/Escalate)."
-                    )
-                elif (
-                    required in msg
-                    or required.replace("_", " ") in msg
-                    or required.replace("_", "") in msg.replace("_", "").replace(" ", "")
-                ):
-                    duplicate = (
-                        self._document_requested
-                        and self._last_requested_document == required
-                    )
-                    self._document_requested = True
-                    self._last_requested_document = required
-                    doc_type = required
-                    self._env_message = document_simulation(doc_type, claim)
-                    if claim.get("document_outcome") == "provided":
-                        self._document_satisfied = True
-                        claim["missing_document"] = None
-                        claim["_document_cleared"] = True
-                        reward = -0.05 if duplicate else 0.2
-                    else:
-                        self._document_request_resolved = True
-                        reward = -0.2 if duplicate else 0.1
-                        self._env_message = (
-                            f"{document_simulation(doc_type, claim)} "
-                            "Resolve the ticket now; do not request the same document again."
-                        )
+            elif self._document_request_resolved:
+                reward = -0.3
+                self._env_message = (
+                    "Document already requested. Resolve the ticket now "
+                    "(Approve/Reject/Escalate)."
+                )
+            elif (
+                required in msg
+                or required.replace("_", " ") in msg
+                or required.replace("_", "") in msg.replace("_", "").replace(" ", "")
+            ):
+                duplicate = (
+                    self._document_requested
+                    and self._last_requested_document == required
+                )
+                self._document_requested = True
+                self._last_requested_document = required
+                doc_type = required
+                self._env_message = document_simulation(doc_type, claim)
+                if claim.get("document_outcome") == "provided":
+                    self._document_satisfied = True
+                    claim["missing_document"] = None
+                    claim["_document_cleared"] = True
+                    reward = -0.05 if duplicate else 0.2
                 else:
-                    reward = -0.1
-                    hint = infer_required_document(
-                        self._get_observation().model_dump(), claim
-                    )
+                    self._document_request_resolved = True
+                    reward = -0.2 if duplicate else 0.1
                     self._env_message = (
-                        f"Requested document does not match required '{required}'. "
-                        f"Request '{hint}' explicitly in your message."
+                        f"{document_simulation(doc_type, claim)} "
+                        "Resolve the ticket now; do not request the same document again."
                     )
+            else:
+                reward = -0.1
+                hint = infer_required_document(
+                    self._get_observation().model_dump(), claim
+                )
+                self._env_message = (
+                    f"Requested document does not match required '{required}'. "
+                    f"Request '{hint}' explicitly in your message."
+                )
 
             return self._finalize_step(reward, action)
 
@@ -244,31 +237,6 @@ class ComplianceEnv(Environment):
                 return self._finalize_step(reward, action)
 
             decision = self._decision_value(action.decision)
-
-            if task_id == "medium":
-                if not self._has_searched_policy():
-                    reward -= 1.0
-                elif not self._ever_useful_search:
-                    reward -= 0.4
-
-            if task_id == "hard":
-                required = claim.get("missing_document") or claim.get("required_document")
-                if required and not self._document_requested:
-                    reward -= 0.15
-                if (
-                    required
-                    and claim.get("document_outcome") == "provided"
-                    and not self._document_satisfied
-                ):
-                    reward -= 0.3
-                if (
-                    required
-                    and claim.get("document_outcome") == "not_provided"
-                    and decision == TicketDecision.APPROVE.value
-                ):
-                    reward -= 0.3
-                if not self._has_searched_policy():
-                    reward -= 0.15
 
             gt = claim.get("ground_truth_decision")
             gt_value = self._decision_value(gt) or str(gt)
@@ -287,13 +255,6 @@ class ComplianceEnv(Environment):
         if task_id == "hard" and claim.get("vague_description"):
             return claim["vague_description"]
         return claim.get("description", "")
-
-    def _visible_rule_keyword(self, claim: dict, task_id: str) -> str:
-        if task_id == "easy":
-            return claim.get("rule_keyword", "unknown")
-        if self._policy_revealed:
-            return claim.get("rule_keyword", "unknown")
-        return "hidden"
 
     def _visible_missing_document(self, claim: dict, task_id: str) -> str | None:
         md = claim.get("missing_document") or claim.get("required_document")
@@ -330,7 +291,6 @@ class ComplianceEnv(Environment):
             description=self._visible_description(claim, task_id),
             has_receipt=claim["has_receipt"],
             missing_document=self._visible_missing_document(claim, task_id),
-            rule_keyword=self._visible_rule_keyword(claim, task_id),
             policy_retrieved=self._policy_revealed,
             risk_score=claim["risk_score"],
             env_message=self._env_message,

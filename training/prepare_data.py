@@ -33,7 +33,7 @@ class StepRecord:
 
 
 def _clean_observation(obs: Dict[str, Any]) -> Dict[str, Any]:
-    """Prompt fields only — no reward/done leakage."""
+    """Prompt fields only — no reward/done leakage, no rule_keyword hint."""
     keys = (
         "ticket_id",
         "employee_name",
@@ -44,13 +44,47 @@ def _clean_observation(obs: Dict[str, Any]) -> Dict[str, Any]:
         "description",
         "has_receipt",
         "missing_document",
-        "rule_keyword",
+        "policy_retrieved",
         "risk_score",
         "env_message",
         "step_count",
         "max_steps",
     )
     return {k: obs[k] for k in keys if k in obs}
+
+
+def _claim_needs_search(claim: Dict[str, Any]) -> bool:
+    """Content-based: does this claim warrant a policy search before resolving?"""
+    level = claim.get("employee_level", "")
+    if level in ("L7", "L8"):
+        return False  # Escalate immediately — rule is unambiguous
+
+    category = claim.get("policy_category", "")
+    if category in ("duplicate", "personal", "seniority"):
+        return False
+
+    amount = float(claim.get("amount", 0) or 0)
+    desc = (
+        claim.get("vague_description") or claim.get("description") or ""
+    ).lower()
+
+    # Meal threshold ambiguity
+    if amount > 2000 and any(k in desc for k in ("meal", "dinner", "lunch", "breakfast", "food", "entertainment")):
+        return True
+    # GST / high-value invoice rule
+    if amount > 5000:
+        return True
+    # Cab: day vs night rule requires policy lookup
+    if any(k in desc for k in ("cab", "ride", "taxi", "auto")):
+        return True
+    # WFH cap rule
+    if any(k in desc for k in ("wfh", "internet", "electricity", "remote", "work from home")):
+        return True
+    # International travel rule
+    if any(k in desc for k in ("international", "flight", "hotel", "travel", "airline")):
+        return True
+
+    return False
 
 
 def choose_action(
@@ -77,40 +111,22 @@ def choose_action(
     gt = claim.get("ground_truth_decision", "Approve")
     reason = claim.get("ground_truth_reason") or f"Ground truth: {gt}."
     rule = claim.get("rule_keyword", "policy")
-    if rule.lower() in ("hidden", "unknown", ""):
+    if not rule or rule.lower() in ("hidden", "unknown", ""):
         rule = "policy"
 
-    if task_id == "easy":
-        return {
-            "action_type": "ResolveTicket",
-            "decision": gt,
-            "reason": reason,
-        }
-
-    if task_id == "medium":
-        if (
-            observation.get("rule_keyword") == "hidden"
-            and not observation.get("policy_retrieved")
-        ):
-            return {"action_type": "SearchPolicy", "query": rule}
-        return {
-            "action_type": "ResolveTicket",
-            "decision": gt,
-            "reason": reason,
-        }
-
-    # hard
-    if (
-        observation.get("rule_keyword") == "hidden"
-        and not observation.get("policy_retrieved")
-    ):
+    # Step 1: search if needed and not yet done
+    if _claim_needs_search(claim) and not observation.get("policy_retrieved"):
         return {"action_type": "SearchPolicy", "query": rule}
+
+    # Step 2: request missing document once policy is in hand
     req = claim.get("required_document") or claim.get("missing_document")
     if req and observation.get("missing_document"):
         return {
             "action_type": "RequestInformation",
             "message": f"Please provide {req}",
         }
+
+    # Step 3: resolve
     return {
         "action_type": "ResolveTicket",
         "decision": gt,

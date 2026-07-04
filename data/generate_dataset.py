@@ -80,6 +80,41 @@ def get_ground_truth(claim: Dict[str, Any]) -> Tuple[str, str]:
     return "Approve", "No violation."
 
 
+def _assign_complexity(claim: Dict[str, Any]) -> str:
+    """
+    Content-driven complexity label (independent of task_difficulty).
+    direct   — resolve immediately, no search or doc hunt needed
+    search   — policy search needed before deciding
+    dochunt  — document request needed after search
+    full     — both search + document request required
+    """
+    needs_doc = bool(claim.get("required_document") or claim.get("missing_document"))
+    amount = float(claim.get("amount", 0) or 0)
+    # Use the concrete description for complexity labeling (internal — not the vague version the model sees)
+    desc = (claim.get("description") or claim.get("vague_description") or "").lower()
+    level = claim.get("employee_level", "")
+    category = claim.get("policy_category", "")
+
+    if level in ("L7", "L8") or category in ("duplicate", "personal", "seniority"):
+        return "direct"
+
+    needs_search = (
+        (amount > 2000 and any(k in desc for k in ("meal", "dinner", "lunch", "breakfast", "entertainment")))
+        or amount > 5000
+        or any(k in desc for k in ("cab", "ride", "taxi"))
+        or any(k in desc for k in ("wfh", "internet", "electricity"))
+        or any(k in desc for k in ("international", "flight", "hotel", "travel"))
+    )
+
+    if needs_search and needs_doc:
+        return "full"
+    if needs_search:
+        return "search"
+    if needs_doc:
+        return "dochunt"
+    return "direct"
+
+
 def base_claim(cid: int) -> Dict[str, Any]:
     emp = random.choice(EMPLOYEES)
     return {
@@ -144,6 +179,7 @@ def generate_easy_claim(cid: int, label: str | None = None) -> Dict[str, Any]:
     d, r = get_ground_truth(c)
     c["ground_truth_decision"] = d
     c["ground_truth_reason"] = r
+    c["complexity"] = _assign_complexity(c)
     c["notes"] = f"Easy: {category}"
     return c
 
@@ -192,6 +228,7 @@ def generate_medium_claim(cid: int, category: str | None = None) -> Dict[str, An
     d, r = get_ground_truth(c)
     c["ground_truth_decision"] = d
     c["ground_truth_reason"] = r
+    c["complexity"] = _assign_complexity(c)
     c["notes"] = f"Medium: {cat}"
     return c
 
@@ -254,6 +291,7 @@ def generate_hard_claim(cid: int, scenario: str | None = None) -> Dict[str, Any]
     d, r = get_ground_truth(c)
     c["ground_truth_decision"] = d
     c["ground_truth_reason"] = r
+    c["complexity"] = _assign_complexity(c)
     c["notes"] = f"Hard: {sc}"
     return c
 

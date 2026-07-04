@@ -443,7 +443,7 @@ def main() -> None:
     parser.add_argument("--output-dir", default="training/checkpoints/grpo")
     parser.add_argument(
         "--curriculum-stage",
-        default="stage_3_hard",
+        default="stage_3_full",
         choices=list(CURRICULUM_STAGES.keys()),
         help="Filter/weight GRPO prompts by curriculum stage.",
     )

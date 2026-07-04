@@ -37,7 +37,7 @@ class ComplianceObservation(Observation):
     description: str
     has_receipt: bool
     missing_document: Optional[str] = None
-    rule_keyword: str
+    rule_keyword: Optional[str] = None  # Never surfaced to the model; kept for internal grading only
     policy_retrieved: bool = False
     risk_score: float = Field(..., ge=0, le=1)
     env_message: str

@@ -11,11 +11,22 @@ from typing import Any, Dict, List, Optional, Sequence
 # Curriculum stage definitions (OpenEnv course module-5 style progression)
 CURRICULUM_STAGES: Dict[str, Dict[str, Any]] = {
     "stage_0_baseline": {"tasks": ["easy", "medium", "hard"], "weights": None},
-    "stage_1_easy": {"tasks": ["easy"], "weights": {"easy": 1.0}},
-    "stage_2_medium": {
-        "tasks": ["easy", "medium"],
-        "weights": {"easy": 0.3, "medium": 0.7},
+    # Content-driven complexity stages (no rule_keyword signal — model deduces from claim facts)
+    "stage_1_direct": {
+        "tasks": ["easy"],
+        "weights": {"easy": 1.0},
     },
+    "stage_2_search": {
+        "tasks": ["easy", "medium"],
+        "weights": {"easy": 0.40, "medium": 0.60},
+    },
+    "stage_3_full": {
+        "tasks": ["easy", "medium", "hard"],
+        "weights": {"easy": 0.20, "medium": 0.35, "hard": 0.45},
+    },
+    # Legacy stage names kept for backward compatibility
+    "stage_1_easy": {"tasks": ["easy"], "weights": {"easy": 1.0}},
+    "stage_2_medium": {"tasks": ["easy", "medium"], "weights": {"easy": 0.3, "medium": 0.7}},
     "stage_3_hard": {
         "tasks": ["easy", "medium", "hard"],
         "weights": {"easy": 0.15, "medium": 0.35, "hard": 0.50},
@@ -25,17 +36,21 @@ CURRICULUM_STAGES: Dict[str, Dict[str, Any]] = {
 DEFAULT_LORA_TARGET = ["q_proj", "k_proj", "v_proj", "o_proj"]
 
 COMPLIANCE_SYSTEM_PROMPT = """\
-You are an AI Compliance Officer. Audit employee expense claims against company policy.
+You are an AI Compliance Officer. Review employee expense claims against company policy.
 
-Use the available action JSON types:
-- EASY: never SearchPolicy; Resolve directly.
-- MEDIUM/HARD: SearchPolicy once when rule_keyword is hidden (meal, gst, cab).
-- Never set SearchPolicy query to "hidden" or echo rule_keyword; use meal, gst, cab, etc.
-- RequestInformation only when missing_document is set; name the concrete doc type.
-- If env_message says a document was not provided, Reject — do not Approve.
-- ResolveTicket after policy is retrieved and any document request is answered.
-- If missing_document is "required", infer the likely concrete document type
-  (manager_approval, gst_invoice, vp_approval, or utility_bill) before requesting it.
+For each claim, decide which action to take next based solely on the claim facts:
+
+Use SearchPolicy when the claim details suggest a policy threshold you need to verify
+before deciding — for example: meal expenses near or above ₹500/₹2,000, amounts above
+₹5,000 (GST rule), cab rides (day vs night), WFH allowances, or international travel.
+Use a short topical query: meal, gst, cab, wfh, international.
+
+Use RequestInformation when a required document is flagged as missing
+(missing_document is set) and you have already retrieved the relevant policy.
+Name the specific document type explicitly.
+
+Use ResolveTicket when you have all information needed to decide.
+Return Approve, Reject, or Escalate with a brief reason citing the applicable rule.
 
 Return only one valid JSON action for the next step.
 """
@@ -80,16 +95,14 @@ def sanitize_search_query(
     observation: Optional[Dict[str, Any]] = None,
     claim: Optional[Dict[str, Any]] = None,
 ) -> str:
-    """Map missing or placeholder queries to a real policy keyword (never 'hidden')."""
+    """Map missing or placeholder queries to a real policy keyword."""
     from app.agent_helpers import search_query_for_hidden_policy
 
     text = str(query or "").strip()
     if text.lower() not in _INVALID_SEARCH_QUERIES:
         return text[:500]
 
-    if observation and observation.get("rule_keyword") not in (None, "", "hidden"):
-        return str(observation.get("rule_keyword") or "policy")[:500]
-
+    # No rule_keyword hint available anymore — derive from claim content
     return search_query_for_hidden_policy(observation or {}, claim)[:500]
 
 
@@ -379,7 +392,6 @@ def build_step_prompt(observation: Dict[str, Any]) -> str:
             "description",
             "has_receipt",
             "missing_document",
-            "rule_keyword",
             "policy_retrieved",
             "risk_score",
             "env_message",
@@ -393,11 +405,6 @@ def build_step_prompt(observation: Dict[str, Any]) -> str:
         extra += "\nPolicy already retrieved. Do not SearchPolicy again."
         if not clean.get("missing_document"):
             extra += " ResolveTicket now; no further document requests."
-    elif clean.get("rule_keyword") == "hidden":
-        extra += (
-            "\nPolicy hidden. SearchPolicy once with a short query (meal, gst, cab) — "
-            "never use query=hidden."
-        )
     missing = clean.get("missing_document")
     step_count = int(clean.get("step_count", 1) or 1)
     max_steps = int(clean.get("max_steps", 8) or 8)

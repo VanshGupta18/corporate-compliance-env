@@ -19,6 +19,26 @@ from pathlib import Path
 from typing import Dict, Optional, Any
 
 from openai import OpenAI
+
+
+def _load_dotenv() -> None:
+    """Load project .env into os.environ (does not override existing vars)."""
+    env_path = Path(__file__).resolve().parent / ".env"
+    if not env_path.is_file():
+        return
+    for line in env_path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, value)
+
+
+_load_dotenv()
+
 from app.client import ComplianceEnvClient
 from app.agent_helpers import (
     document_unavailable,
@@ -26,6 +46,7 @@ from app.agent_helpers import (
     resolve_after_missing_document,
     search_query_for_hidden_policy,
     task_prompt_prefix,
+    _needs_policy_search,
 )
 from app.document_utils import infer_required_document
 from app.graders import grade_episode
@@ -42,7 +63,7 @@ from training.training_utils import parse_model_action
 
 # ===== Environment Configuration =====
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-API_KEY = os.getenv("HF_TOKEN")
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("OPENAI_API_KEY")
 MODEL_NAME = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
 COMPLIANCE_API = os.getenv("COMPLIANCE_API", "https://mcqueenmater-env-corporate.hf.space")
 
@@ -55,23 +76,27 @@ MAX_TOKENS = 256
 
 SYSTEM_PROMPT = textwrap.dedent(
     """
-    You are an AI Compliance Officer. Your job is to audit employee expense claims
-    against company policy and decide whether to Approve, Reject, or Escalate each ticket.
-    
-    You have three action types available:
-    1. SearchPolicy(query: str) - Search the policy rulebook when you need information
-    2. RequestInformation(message: str) - Ask the employee for missing documents
-    3. ResolveTicket(decision: str, reason: str) - Make your final decision
-    
-    Valid decisions: "Approve", "Reject", "Escalate"
-    
-    EASY tasks: rule_keyword is visible — never use SearchPolicy; Resolve directly.
-    MEDIUM/HARD: use SearchPolicy at most once when rule_keyword is "hidden".
-    Use short queries: meal, large meal, gst, cab, international.
-    After policy_retrieved is true, never search again. Use RequestInformation only when
-    missing_document is set (not null). If env_message says a document was not provided,
-    Reject (do not Approve). After a document response, ResolveTicket immediately.
-    
+    You are an AI Compliance Officer. Review employee expense claims against company policy
+    and decide whether to Approve, Reject, or Escalate each ticket.
+
+    You have three action types:
+    1. SearchPolicy(query: str) — search the policy rulebook when the claim amount or
+       category implies a threshold you need to verify before deciding.
+       Use short topical queries: meal, large meal, gst, cab, wfh, international.
+    2. RequestInformation(message: str) — ask for a missing document once you know the
+       applicable policy. Name the specific document type explicitly.
+    3. ResolveTicket(decision: str, reason: str) — make your final decision once you have
+       enough information. Valid decisions: "Approve", "Reject", "Escalate".
+
+    When to search: meal expenses near thresholds (₹500/₹2,000), amounts above ₹5,000
+    (GST rule), cab rides (day vs night approval rule), WFH claims, international travel.
+    When NOT to search: amounts clearly below ₹500, obvious alcohol/personal expenses,
+    or after policy has already been retrieved (policy_retrieved = true).
+
+    After policy is retrieved, never search again. Use RequestInformation only when
+    missing_document is set (not null). If env_message confirms a document was not
+    provided, Reject — do not Approve. After a document response, ResolveTicket immediately.
+
     Respond with ONLY a valid action in JSON format:
     {"action_type": "...", "query": "...", "message": "...", "decision": "...", "reason": "..."}
     """
@@ -79,21 +104,22 @@ SYSTEM_PROMPT = textwrap.dedent(
 
 
 def build_user_prompt(
-    observation: Dict, step: int, task_id: str = "medium"
+    observation: Dict, step: int, task_id: str = "medium", claim: Optional[Dict[str, Any]] = None
 ) -> str:
-    """Build the user prompt from the current observation (no curriculum labels)."""
+    """Build the user prompt from the current observation — no rule_keyword field."""
     max_steps = int(observation.get("max_steps") or MAX_STEPS_PER_TASK)
-    steps_remaining = (max_steps - step + 1)
-    
+    steps_remaining = max_steps - step + 1
+
     policy_retrieved = bool(observation.get("policy_retrieved"))
     missing_doc = observation.get("missing_document")
-    policy_note = task_prompt_prefix(task_id, observation)
+
+    # Build the contextual hint
     if policy_retrieved and document_unavailable(observation):
-        policy_note += (
+        policy_note = (
             "\nEnvironment says the requested document was NOT provided. "
             "Resolve with Reject (GST/meal rules), not Approve."
         )
-    if policy_retrieved:
+    elif policy_retrieved:
         if missing_doc:
             if missing_doc == "required":
                 hint = infer_required_document(observation)
@@ -112,27 +138,21 @@ def build_user_prompt(
                 "\nPolicy retrieved. No missing document — ResolveTicket now. "
                 "Do NOT SearchPolicy or RequestInformation."
             )
-    elif observation.get("rule_keyword") == "hidden":
-        policy_note = (
-            "\nPolicy rule is hidden. SearchPolicy once with a short query "
-            "(meal, large meal, gst, cab), then proceed."
-        )
-    elif missing_doc == "required":
-        policy_note = (
-            f"\nSearchPolicy first, then request '{infer_required_document(observation)}'."
-        )
+    else:
+        # Content-based hint: suggest search when claim implies a threshold rule
+        policy_note = task_prompt_prefix(task_id, observation)
 
     urgency = ""
-    if step >= 3:
+    if step >= max_steps - 1:
         urgency = (
-            f"\nURGENT: {steps_remaining - 1} step(s) left. "
+            f"\nURGENT: {steps_remaining} step(s) left. "
             "Do NOT search policy again. Resolve the ticket now."
         )
 
     prompt = textwrap.dedent(
         f"""
         Step: {step}/{max_steps}
-        
+
         Ticket ID: {observation.get('ticket_id')}
         Employee: {observation.get('employee_name')} ({observation.get('employee_role')})
         Level: {observation.get('employee_level')}
@@ -140,14 +160,13 @@ def build_user_prompt(
         Description: {observation.get('description')}
         Has Receipt: {observation.get('has_receipt')}
         Missing Document: {observation.get('missing_document')}
-        Rule keyword: {observation.get('rule_keyword')}
         Policy retrieved: {policy_retrieved}
         Environment message: {observation.get('env_message', '')}{policy_note}
-        
+
         Your Task:
         - Review the ticket against policy rules
         - Make a FINAL decision (Approve/Reject/Escalate) when you have sufficient information{urgency}
-        
+
         What action do you take?
         """
     ).strip()
@@ -157,12 +176,11 @@ def build_user_prompt(
 def rule_based_fallback(
     observation: Dict, task_id: str = "medium", claim: Optional[Dict[str, Any]] = None
 ) -> Dict:
-    """Rule-based fallback when LLM output is invalid."""
+    """Rule-based fallback when LLM output is invalid — content-based, no rule_keyword."""
     amount = observation.get("amount", 0)
     level = observation.get("employee_level", "L1")
     has_receipt = observation.get("has_receipt", False)
     missing_doc = observation.get("missing_document")
-    rule_keyword = (observation.get("rule_keyword") or "").lower()
     description = (observation.get("description") or "").lower()
     policy_retrieved = bool(observation.get("policy_retrieved"))
 
@@ -183,7 +201,8 @@ def rule_based_fallback(
     except ValueError:
         pass
 
-    if rule_keyword == "hidden" and not policy_retrieved and task_id != "easy":
+    # Search when content implies a threshold — but only once
+    if not policy_retrieved and _needs_policy_search(observation, claim):
         return {
             "action_type": "SearchPolicy",
             "query": search_query_for_hidden_policy(observation, claim),
@@ -209,7 +228,7 @@ def rule_based_fallback(
             "reason": "GST invoice missing (Rule 12)",
         }
 
-    if task_id == "easy" or policy_retrieved:
+    if policy_retrieved or amount < 500:
         if amount < 500:
             return {
                 "action_type": "ResolveTicket",
@@ -258,7 +277,7 @@ def run_episode(
     for step in range(1, max_steps + 1):
         # Build prompt for LLM
         obs_dict = observation.model_dump() if hasattr(observation, 'model_dump') else observation.__dict__
-        user_prompt = build_user_prompt(obs_dict, step, task_id=task_id)
+        user_prompt = build_user_prompt(obs_dict, step, task_id=task_id, claim=claim)
 
         # Call LLM
         try:
@@ -342,6 +361,14 @@ def run_episode(
 
 def main() -> None:
     """Main function to run inference on all claims and save results."""
+    if not API_KEY:
+        print(
+            "ERROR: Missing API key. Set HF_TOKEN in .env or export it:\n"
+            "  export HF_TOKEN=hf_...\n"
+            "  # or: export OPENAI_API_KEY=...",
+            flush=True,
+        )
+        sys.exit(1)
     try:
         client = ComplianceEnvClient(base_url=COMPLIANCE_API).sync()
         
