@@ -510,6 +510,44 @@ def resolve_grpo_trainer():
     return OpenEnvGRPOTrainer
 
 
+def clear_unsloth_compiled_cache() -> None:
+    """Remove stale Unsloth compiled trainers (avoids GRPO NameError bugs)."""
+    import shutil
+
+    cache = Path.cwd() / "unsloth_compiled_cache"
+    if cache.is_dir():
+        shutil.rmtree(cache, ignore_errors=True)
+
+
+def inject_unsloth_grpo_helpers() -> None:
+    """
+    Inject align_completion_tool_mask into Unsloth's compiled GRPO module.
+
+    Unsloth 2026.4.x + TRL 0.24 can compile grpo_accumulated_loss that calls
+    align_completion_tool_mask without defining it in module scope (NameError).
+    """
+    try:
+        from unsloth_zoo.rl_replacements import (
+            align_completion_tool_mask,
+            align_logprobs_with_mask,
+        )
+    except ImportError:
+        return
+
+    import sys
+
+    helpers = {
+        "align_completion_tool_mask": align_completion_tool_mask,
+        "align_logprobs_with_mask": align_logprobs_with_mask,
+    }
+    for mod in sys.modules.values():
+        if mod is None:
+            continue
+        if callable(getattr(mod, "grpo_accumulated_loss", None)):
+            for name, fn in helpers.items():
+                setattr(mod, name, fn)
+
+
 def require_rollout_dependencies(
     require_generate: bool = True,
     *,

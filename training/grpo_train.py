@@ -21,9 +21,11 @@ from app.server.environment import ComplianceEnv
 
 from training.training_utils import (
     CURRICULUM_STAGES,
+    clear_unsloth_compiled_cache,
     extract_task_id,
     filter_dataset_by_curriculum,
     grpo_supports_rollout_func,
+    inject_unsloth_grpo_helpers,
     load_unsloth_model,
     native_grpo_supports_rollout_func,
     parse_json_payload,
@@ -519,6 +521,7 @@ def main() -> None:
         print("Dry run OK — dataset and curriculum wiring ready.")
         return
 
+    clear_unsloth_compiled_cache()
     require_rollout_dependencies(require_generate=True)
     if not grpo_supports_rollout_func():
         raise RuntimeError(
@@ -591,6 +594,7 @@ def main() -> None:
         rollout_func=rollout_fn,
         callbacks=[_JsonlMetricsCallback(args.log_file)],
     )
+    inject_unsloth_grpo_helpers()
     trainer.train()
 
     if log_learning_point is not None:
