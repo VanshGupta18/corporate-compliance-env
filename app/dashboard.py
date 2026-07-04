@@ -27,6 +27,7 @@ from app.paths import (
     INFERENCE_RESULTS,
     TEST_SPLIT,
     TRAINING_EPISODES,
+    TRAINING_EPISODES_LEGACY,
     TRAINING_EPISODES_ROOT,
     TRAINING_LOG,
     TRAINING_RESULTS,
@@ -362,11 +363,11 @@ def _parse_episode_log(path: Path, method: str) -> Tuple[List[Dict], List[Dict]]
 
 
 def _training_jsonl_candidate_paths() -> List[Path]:
-    """Resolve episodes.jsonl from Colab root copy or training/logs/."""
+    """Resolve episodes.jsonl from results/, then legacy Colab/root paths."""
     candidates = [
-        TRAINING_EPISODES_ROOT,
         TRAINING_EPISODES,
-        ARTIFACT_ROOT / "training/logs/episodes.jsonl",
+        TRAINING_EPISODES_ROOT,
+        TRAINING_EPISODES_LEGACY,
     ]
     seen: set[str] = set()
     ordered: List[Path] = []
@@ -805,7 +806,7 @@ _REACT_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <title>Corporate Compliance Audit Console</title>
 <style>
 :root{
@@ -1085,6 +1086,64 @@ a{color:var(--blue);text-decoration:none}
 .css-group-lbl{text-align:center;color:var(--body);font-size:12px;font-weight:800;margin-top:8px}
 .css-legend{grid-column:1/-1;display:flex;gap:14px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:8px;padding-left:24px;font-weight:700}
 .css-legend-dot{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle}
+
+/* ── Mobile / phone layout ────────────────────────────────────────── */
+@media(max-width:640px){
+  .dash{padding:16px 14px 48px;
+    padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+  .page-section{padding:28px 0}
+  .section-heading{font-size:18px}
+  .section-lead{font-size:13px}
+  .hero{padding:28px 20px;border-radius:18px}
+  .hero h1{font-size:26px;margin-bottom:12px}
+  .hero p{font-size:14px}
+  .hero-toolkit{min-width:0;width:100%}
+  .paradigm-item{padding:18px 16px}
+  .paradigm-score{font-size:26px}
+  .lifecycle-band{padding:18px 16px;border-radius:14px}
+  .lc-step{padding:14px 12px}
+  .chart-section{padding:18px 16px;border-radius:14px}
+  .curriculum-card{padding:16px 14px}
+  .curr-hdr{flex-direction:column;align-items:flex-start}
+  .curr-meta{white-space:normal}
+  .audit-workspace{padding:18px 16px;border-radius:16px}
+  .workspace-title{font-size:17px}
+  .replay-controls{flex-direction:column;align-items:stretch;gap:12px;padding:12px}
+  .replay-controls .tab-grp{width:100%}
+  .replay-controls .tab-btn{flex:1;min-height:44px;padding:10px 8px;font-size:11px;
+    white-space:normal;line-height:1.25;text-align:center}
+  .random-btn{width:100%;min-height:44px;padding:12px 18px;font-size:13px}
+  .replay-meta{margin-left:0;width:100%;text-align:center;font-size:11px;word-break:break-word}
+  .replay-empty{padding:28px 16px;font-size:13px}
+  .case-header{padding:14px 16px;flex-direction:column;align-items:flex-start;gap:10px}
+  .case-header-right{width:100%;justify-content:space-between}
+  .case-id{font-size:15px}
+  .case-amount-badge{font-size:16px}
+  .case-docket,.investigation-rail{padding:16px}
+  .amount-big{font-size:22px}
+  .rail-verdict-inner{flex-direction:column;gap:12px}
+  .grade-score{font-size:36px}
+  .verdict-stamp{font-size:11px;padding:6px 12px}
+  .step-hdr{flex-wrap:wrap;gap:6px}
+  .step-detail{margin-left:0;padding-left:0}
+  .css-chart{padding:14px 8px 8px 32px;gap:10px;min-height:220px}
+  .css-chart-scale{left:4px;font-size:10px;height:160px}
+  .css-bars{height:160px}
+  .css-bar{width:18px}
+  .css-bar-lbl{font-size:8px;max-width:40px}
+  .css-legend{padding-left:0;gap:10px;font-size:11px}
+  .rb-toggle{padding:14px 16px;font-size:13px}
+  .rb-body{padding:14px 16px}
+  .outcome-row{flex-wrap:wrap;gap:8px}
+  .outcome-row-val{font-size:17px}
+  .narrative-text .narrative-title{font-size:15px}
+  button,.tab-btn,.random-btn,.rb-toggle{-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+}
+@media(max-width:400px){
+  .hero h1{font-size:23px}
+  .replay-controls .tab-grp{flex-direction:column}
+  .replay-controls .tab-btn{flex:none;width:100%}
+}
 </style>
 </head>
 <body>

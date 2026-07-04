@@ -170,7 +170,7 @@ class ComplianceEnv(Environment):
                 self._useful_search = relevant
                 self._ever_useful_search = self._ever_useful_search or relevant
                 self._env_message = snippet
-                reward = 0.15 if relevant else -0.05
+                reward = 0.3 if relevant else -0.05
 
             return self._finalize_step(reward, action)
 
@@ -242,6 +242,11 @@ class ComplianceEnv(Environment):
             gt_value = self._decision_value(gt) or str(gt)
             is_correct = decision == gt_value
             reward += 1.0 if is_correct else -1.0
+
+            # Penalize resolving medium/hard without ever searching policy
+            if task_id in ("medium", "hard") and not self._ever_useful_search:
+                reward -= 0.4
+
             self._state.is_done = True
 
             return self._finalize_step(reward, action)

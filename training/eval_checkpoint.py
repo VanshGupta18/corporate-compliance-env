@@ -23,7 +23,7 @@ from app.graders import (
     normalize_decision_value,
 )
 from app.models import ComplianceAction
-from app.paths import TRAINING_EPISODES, TRAINING_LOG, TRAINING_RESULTS
+from app.paths import BASELINE_RESULTS, TRAINING_EPISODES, TRAINING_LOG, TRAINING_RESULTS
 from app.run_logging import (
     append_episode_jsonl,
     format_step_log,
@@ -476,7 +476,7 @@ def main() -> None:
     parser.add_argument("--episode-log-file", default=str(TRAINING_EPISODES))
     parser.add_argument("--results-file", default=str(TRAINING_RESULTS))
     parser.add_argument("--run-log-file", default=str(TRAINING_LOG))
-    parser.add_argument("--baseline-file", default="baseline_results.json")
+    parser.add_argument("--baseline-file", default=str(BASELINE_RESULTS))
     parser.add_argument("--clear-log", action="store_true")
     parser.add_argument(
         "--no-tee",

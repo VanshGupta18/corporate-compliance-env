@@ -70,10 +70,15 @@ data/generated_*.json
 data/temp_*.json
 
 # ── Runtime / training artifacts (regenerate locally) ──
-# Root benchmark JSON + run logs are committed for HF /dashboard.
-!baseline_results.json
-!inference_results.json
-!training_results.json
+# Benchmark JSON + run logs under results/ are committed for HF /dashboard.
+results/*
+!results/baseline_results.json
+!results/inference_results.json
+!results/training_results.json
+!results/episodes.jsonl
+!results/baseline_run.log
+!results/inference_run.log
+!results/training_run.log
 
 training/data/
 training/logs/
